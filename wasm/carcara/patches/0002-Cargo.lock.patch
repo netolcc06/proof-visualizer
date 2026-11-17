@@ -1,0 +1,12 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index e2a3167..4d6faba 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -65,6 +65,7 @@ dependencies = [
+  "carcara-macros",
+  "clap",
+  "crossbeam-queue",
++ "gmp-mpfr-sys",
+  "indexmap",
+  "log",
+  "nom",

@@ -1,0 +1,14 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 3166e4f3..6b193471 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -27,6 +27,9 @@ thiserror = "2.0.20"
+ nom = "8.0.0"
+ owo-colors = "4"
+ 
++[target.'cfg(target_os = "emscripten")'.dependencies]
++gmp-mpfr-sys = { version = "1.7", default-features = false, features = ["use-system-libs", "force-cross"] }
++
+ [dev-dependencies]
+ test-generator = { path = "test-generator" }
+ rand = "0.10.2"
