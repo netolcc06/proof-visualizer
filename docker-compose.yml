@@ -40,6 +40,9 @@ services:
             additional_contexts:
                 # veriT wasm built by `make verit-wasm`; keeps ./wasm out of the frontend build context
                 verit-dist: ./wasm/verit/dist
+                # Carcara wasm built by `make carcara-wasm`, and the bundled RARE rules
+                carcara-dist: ./wasm/carcara/dist
+                carcara-rare: ./bridge/rare
         ports:
             - '127.0.0.1:8080:80'
         profiles: [web]

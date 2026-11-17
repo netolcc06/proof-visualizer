@@ -8,6 +8,12 @@
 # or: docker build --build-context verit-dist=../wasm/verit/dist .
 FROM scratch AS verit-dist
 
+# Carcara wasm (carcara.js, carcara.wasm, licences) and the bundled RARE rules. Empty by default; compose supplies
+# `carcara-dist` (wasm/carcara/dist) and `carcara-rare` (bridge/rare), or:
+#   docker build --build-context carcara-dist=../wasm/carcara/dist --build-context carcara-rare=../bridge/rare .
+FROM scratch AS carcara-dist
+FROM scratch AS carcara-rare
+
 FROM node:22-alpine AS build
 WORKDIR /app
 
@@ -15,10 +21,14 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY --from=verit-dist / /verit-wasm
+COPY --from=carcara-dist / /carcara-wasm
+COPY --from=carcara-rare / /carcara-rare
 COPY . .
 ARG CVC5_WASM_DIR=""
 ENV CVC5_WASM_DIR=${CVC5_WASM_DIR}
 ENV VERIT_WASM_DIR=/verit-wasm
+ENV CARCARA_WASM_DIR=/carcara-wasm
+ENV CARCARA_RARE_FILE=/carcara-rare/cvc5-rewrites.rare
 RUN npm run build
 
 # Static serving stage.

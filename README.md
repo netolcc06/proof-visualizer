@@ -12,7 +12,9 @@ and get one, then explore it as an interactive graph and tables.
 - **Solvers.** cvc5 and veriT run in the browser (WebAssembly). Native cvc5, veriT and [Carcara](https://github.com/ufmg-smite/carcara)
   run through the [local bridge](bridge/README.md).
 - **Carcara.** Check or elaborate the current proof. "Elaborate slice from this node" (node context menu) slices the
-  proof from a step, elaborates the slice and splices the result back into the original proof.
+  proof from a step, elaborates the slice and splices the result back into the original proof. Carcara runs in the
+  browser (WebAssembly, the default when deployed) or on the local bridge; choose in Carcara > Carcara settings.
+  In the browser, steps that need an external solver (`lia_generic`) cannot be elaborated or checked.
 - **Image export.** In the graph style, Download saves the whole visible graph as PNG (2x resolution, white
   background) or SVG, regardless of pan and zoom. "Select region…" lets you drag a rectangle on the canvas and save
   just that area as PNG or SVG.
@@ -21,12 +23,14 @@ and get one, then explore it as an interactive graph and tables.
 
 Docker is the primary way to develop, test and run. You only need Docker with Compose v2 (on Windows: Docker inside WSL;
 run `make` from the WSL shell in the repo directory). Nothing else is installed on the host: Node, cvc5, veriT and
-Carcara all come from the images (`make dev`/`web`/`test` first build the veriT wasm with `make verit-wasm`).
+Carcara all come from the images (`make dev`/`web`/`test` first build the veriT and Carcara wasm with `make verit-wasm`
+and `make carcara-wasm`; the first Carcara build takes a couple of minutes, repeats take seconds).
 
 ```
 make dev     # bridge + Vite dev server with hot reload: http://localhost:3000 (bridge: http://localhost:4000)
 make web     # production build behind nginx: http://localhost:8080 (+ bridge)
 make verit-wasm  # build veriT for the browser into wasm/verit/dist (cached by Docker; run by dev, web and test)
+make carcara-wasm  # build Carcara for the browser into wasm/carcara/dist (same)
 make test    # bridge tests against the real cvc5/veriT/Carcara, then frontend typecheck, eslint, tests and build
 make logs    # follow the logs
 make down    # stop everything (the node_modules volume is kept)
@@ -50,9 +54,9 @@ npm install
 npm run dev        # http://localhost:3000
 ```
 
-`npm run dev` and `npm run build` first download the cvc5 wasm and copy the veriT wasm (see
+`npm run dev` and `npm run build` first download the cvc5 wasm and copy the veriT and Carcara wasm (see
 [In-browser solvers](#in-browser-solvers-wasm)), so they need network access once per cvc5 version. Without a veriT
-build (`make verit-wasm`) they only print a warning and the veriT wasm option shows as unavailable. For the native solvers, run the [bridge](#local-bridge-native-cvc5-verit-carcara)
+or Carcara build (`make verit-wasm`, `make carcara-wasm`) they only print a warning and that wasm option shows as unavailable (Carcara then falls back to the bridge). For the native solvers, run the [bridge](#local-bridge-native-cvc5-verit-carcara)
 on the host as well.
 
 ## Build and deploy
@@ -74,11 +78,15 @@ in a folder inside `frontend/` (for example `cvc5-local/`) and build with
 `make web` also passes `wasm/verit/dist` to the image as the named build context `verit-dist` (compose
 `additional_contexts`), so the build context stays `frontend/`. A standalone `docker build` of `frontend/` has no veriT
 wasm (the option shows as unavailable); add it with `--build-context verit-dist=../wasm/verit/dist`.
+Likewise the Carcara wasm comes in as `carcara-dist` (`wasm/carcara/dist`) and the bundled RARE rules as `carcara-rare`
+(`bridge/rare`); standalone: `--build-context carcara-dist=../wasm/carcara/dist --build-context carcara-rare=../bridge/rare`.
 
-To deploy to GitHub Pages by hand, run `make verit-wasm` (or set `VERIT_WASM_DIR` to a directory with the built files)
-before `npm run deploy`; otherwise the published app has no veriT wasm option.
+To deploy to GitHub Pages by hand, run `make verit-wasm carcara-wasm` (or set `VERIT_WASM_DIR` / `CARCARA_WASM_DIR` to
+directories with the built files) before `npm run deploy`; otherwise the published app has no veriT wasm option and
+Carcara only works through a local bridge.
 
-CI deploy: `.github/workflows/pages.yml` builds the veriT wasm, type-checks, lints, tests and builds the frontend, and
+CI deploy: `.github/workflows/pages.yml` builds the veriT and Carcara wasm (each with its own Docker layer cache scope;
+the Carcara build compiles GMP and Rust, so a cold run adds a couple of minutes), type-checks, lints, tests and builds the frontend, and
 deploys it on every push to `main` or `improvements`. In the repository settings, set Pages to use "GitHub Actions" as
 its source and let the `github-pages` environment deploy from those branches.
 
@@ -88,11 +96,12 @@ its source and let the `github-pages` environment deploy from those branches.
 frontend/
   src/alethe/      pure TypeScript (no React/Redux): S-expression + Alethe parser/printer, let map,
                    proof graph, component inference, splicing of elaborated slices
-  src/solvers/     cvc5 and veriT wasm workers, bridge HTTP client, solver output parsing
+  src/solvers/     cvc5, veriT and Carcara wasm workers, bridge HTTP client, solver output parsing
 wasm/verit/        Docker build of veriT 2026.05 for WebAssembly (see wasm/verit/README.md)
+wasm/carcara/      Docker build of Carcara for WebAssembly (see wasm/carcara/README.md)
   src/store/       Redux Toolkit store (proof, graph view, solver state, ...)
   src/components/  React UI (Blueprint): canvas (react-konva), drawers, dialogs, Carcara dialogs
-  scripts/         fetch-cvc5.mjs, fetch-verit.mjs
+  scripts/         fetch-cvc5.mjs, fetch-verit.mjs, fetch-carcara.mjs
 bridge/            local Node HTTP server that spawns native cvc5 / veriT / Carcara
 ```
 
@@ -130,6 +139,31 @@ writes `verit.js`, `verit.wasm` and the licence texts to `wasm/verit/dist/`).
   --proof-with-sharing`; `--proof`, `--output` and positional arguments are rejected.
 - `src/solvers/veritWasm.integration.test.ts` runs the real build in Node and is skipped when `wasm/verit/dist` is missing.
 
+### Carcara
+
+Carcara is built to WebAssembly by [`wasm/carcara/`](wasm/carcara/README.md) (emscripten + GMP + Rust, in Docker;
+`make carcara-wasm` writes `carcara.js`, `carcara.wasm` and the licence texts to `wasm/carcara/dist/`). The approach is
+from [netolcc06/carcara-wasm](https://github.com/netolcc06/carcara-wasm) and
+[ufmg-smite/carcara#149](https://github.com/ufmg-smite/carcara/issues/149); the commit is the same as the bridge's.
+
+- `scripts/fetch-carcara.mjs` (run by `predev` and `prebuild`) copies the build to `frontend/public/carcara/`, together
+  with `bridge/rare/cvc5-rewrites.rare`, which is the default RARE file in the browser (as it is on the bridge, so it
+  is not duplicated in git). `CARCARA_WASM_DIR` / `CARCARA_RARE_FILE` override the sources. A missing build only prints a
+  warning; the app then uses the bridge.
+- `src/solvers/carcaraWasm.ts` returns the same result types as the bridge client (`carcaraCheck`, `carcaraElaborate`,
+  `carcaraSlice`), so the Carcara actions do not care which backend ran. Each run (and the elaboration step of a slice)
+  is a fresh classic Worker (`carcara.worker.ts`) with a fresh wasm instance; the wasm is compiled once. The proof,
+  the problem and the RARE file go into the in-memory filesystem, `callMain` gets the argument layout the bridge builds,
+  and the slice files are read back from it. Timeout and abort terminate the worker. `src/solvers/carcaraCli.ts` holds
+  the argument building and output parsing, mirroring `bridge/src/args.ts` and `parse.ts` (the bridge is a separate
+  package that cannot import frontend code); `carcaraCli.test.ts` pins the same cases as the bridge unit tests.
+- Backend choice: Carcara > Carcara settings, stored in `localStorage` (`pv.carcaraBackend`). Unset means in the browser
+  when the wasm build is deployed, else the bridge. Your custom RARE text (same dialog) is used by both.
+- Limits of the browser build: no external tools (so `lia_generic` steps stay holes, and the result says so), no
+  threads, 4 GB of memory. Details in [`wasm/carcara/README.md`](wasm/carcara/README.md).
+- `src/solvers/carcaraWasm.integration.test.ts` runs the real build in Node (check, slice, elaborate and splice) and is
+  skipped when `wasm/carcara/dist` is missing.
+
 ## Third-party licences
 
 The in-browser solvers ship third-party code statically linked into their wasm binaries:
@@ -137,6 +171,8 @@ The in-browser solvers ship third-party code statically linked into their wasm b
 - veriT (BSD-3-Clause) and its bundled NetBSD `qsort` (BSD 3-clause), plus GMP 6.3.0 (LGPLv3 / GPLv2 dual licence).
   The licence texts are copied to `public/verit/` (and so to the deployed site) next to `verit.wasm`. To rebuild or
   relink with another GMP, use the recipe in [`wasm/verit/`](wasm/verit/README.md) (`Dockerfile`, pinned sources).
+- Carcara (Apache-2.0) plus GMP 6.3.0, statically linked into `carcara.wasm`. Carcara's licence text and GMP's are copied
+  to `public/carcara/` next to it; rebuild or relink with the recipe in [`wasm/carcara/`](wasm/carcara/README.md).
 - The official cvc5 wasm release (BSD-3-Clause) also bundles GMP; see the cvc5 release and its licence files.
 
 ## Local bridge (native cvc5, veriT, Carcara)
@@ -186,8 +222,8 @@ Run in `frontend/` unless noted.
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` / `npm start` | Vite dev server on port 3000 (`dev` fetches cvc5 and veriT first) |
-| `npm run build` | Fetch cvc5 and veriT, type-check, production build into `dist` |
+| `npm run dev` / `npm start` | Vite dev server on port 3000 (`dev` fetches cvc5 and copies veriT and Carcara first) |
+| `npm run build` | Fetch cvc5, copy veriT and Carcara, type-check, production build into `dist` |
 | `npm run preview` | Serve `dist` locally |
 | `npm test` / `npm run test:watch` | Vitest (once / watch) |
 | `npm run lint` | ESLint with `--fix` |
@@ -195,8 +231,9 @@ Run in `frontend/` unless noted.
 | `npm run typecheck` | `tsc -b` |
 | `npm run fetch:cvc5` | Download the cvc5 wasm for `config.cvc5Version` |
 | `npm run fetch:verit` | Copy the veriT wasm build from `VERIT_WASM_DIR` (default `../wasm/verit/dist`) |
+| `npm run fetch:carcara` | Copy the Carcara wasm build from `CARCARA_WASM_DIR` (default `../wasm/carcara/dist`) and the bundled RARE file |
 | `npm run deploy` | Build and publish `dist` to GitHub Pages |
-| `make dev` / `web` / `test` / `verit-wasm` / `logs` / `down` / `build` (repo root) | Docker workflow, see [Quick start](#quick-start-docker) |
+| `make dev` / `web` / `test` / `verit-wasm` / `carcara-wasm` / `logs` / `down` / `build` (repo root) | Docker workflow, see [Quick start](#quick-start-docker) |
 | `npm start` (in `bridge/`) | Run the bridge (`npm run dev` for watch mode) |
 | `npm test` (in `bridge/`) | Bridge tests (also `npm run typecheck`) |
 | `npm run fetch:rare` (in `bridge/`) | Refresh the bundled RARE rules file |

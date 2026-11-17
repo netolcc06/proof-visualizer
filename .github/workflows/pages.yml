@@ -1,4 +1,4 @@
-# Builds the frontend (with the in-browser cvc5 and veriT) and deploys it to GitHub Pages.
+# Builds the frontend (with the in-browser cvc5, veriT and Carcara) and deploys it to GitHub Pages.
 # Pages must use "GitHub Actions" as its source, and the github-pages environment must allow the branch.
 name: Deploy to GitHub Pages
 
@@ -33,6 +33,17 @@ jobs:
                   cache-from: type=gha,scope=verit-wasm
                   cache-to: type=gha,mode=max,scope=verit-wasm
 
+            # Carcara -> WebAssembly (wasm/carcara/Dockerfile). The Rust and GMP build is the heavy part (minutes when
+            # cold); its layers are cached under their own scope, so the veriT and Carcara caches do not evict each other.
+            - name: Build Carcara (WebAssembly)
+              uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+              with:
+                  context: wasm/carcara
+                  target: dist
+                  outputs: type=local,dest=wasm/carcara/dist
+                  cache-from: type=gha,scope=carcara-wasm
+                  cache-to: type=gha,mode=max,scope=carcara-wasm
+
             - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
               with:
                   node-version: 22
@@ -48,7 +59,7 @@ jobs:
                   npm run typecheck
                   npx eslint .
                   npm test
-            # Also downloads the official cvc5 wasm and copies the veriT build (prebuild)
+            # Also downloads the official cvc5 wasm and copies the veriT and Carcara builds (prebuild)
             - name: Build
               working-directory: frontend
               run: npm run build
