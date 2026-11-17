@@ -12,7 +12,9 @@ const initialState: ExternalCmdState = {
         fileChanged: false,
     },
     spinner: 'off',
+    busyLabel: '',
     selectData: { type: false, square: { upperL: { x: -1, y: -1 }, lowerR: { x: -1, y: -1 } } },
+    regionCapture: false,
 };
 
 export const externalCmd = createSlice({
@@ -37,11 +39,19 @@ export const externalCmd = createSlice({
         blockRenderNewFile: (state) => {
             state.renderData.fileChanged = false;
         },
-        setSpinner: (state, action: PayloadAction<'off' | 'cvc5' | 'render'>) => {
+        setSpinner: (state, action: PayloadAction<ExternalCmdState['spinner']>) => {
             state.spinner = action.payload;
+        },
+        // Long-running external work (solver, Carcara); the overlay shows the label
+        setBusy: (state, action: PayloadAction<string>) => {
+            state.spinner = 'busy';
+            state.busyLabel = action.payload;
         },
         setSelectArea: (state, action: PayloadAction<ExternalCmdState['selectData']>) => {
             state.selectData = action.payload;
+        },
+        setRegionCapture: (state, action: PayloadAction<boolean>) => {
+            state.regionCapture = action.payload;
         },
     },
 });
@@ -54,7 +64,9 @@ export const {
     allowRenderNewFile,
     blockRenderNewFile,
     setSpinner,
+    setBusy,
     setSelectArea,
+    setRegionCapture,
 } = externalCmd.actions;
 
 export const selectFindData = (state: RootState): { nodeToFind: number; findOption: boolean } =>
@@ -65,6 +77,10 @@ export const selectRenderData = (state: RootState): { count: number; fileChanged
 
 export const selectSpinner = (state: RootState): ExternalCmdState['spinner'] => state.externalCmd.spinner;
 
+export const selectBusyLabel = (state: RootState): string => state.externalCmd.busyLabel;
+
 export const selectSelectData = (state: RootState): ExternalCmdState['selectData'] => state.externalCmd.selectData;
+
+export const selectRegionCapture = (state: RootState): boolean => state.externalCmd.regionCapture;
 
 export default externalCmd.reducer;

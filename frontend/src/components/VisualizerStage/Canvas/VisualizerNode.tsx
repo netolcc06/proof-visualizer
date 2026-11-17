@@ -1,7 +1,10 @@
-import { KonvaEventObject } from 'konva/types/Node';
+import type { JSX } from 'react';
+import type { KonvaEventObject } from 'konva/lib/Node';
 import React, { useEffect, useState } from 'react';
 import { Label, Text, Tag, Group, Circle, Arrow } from 'react-konva';
 import { NodeProps } from '../../../interfaces/interfaces';
+import { ClusterKind } from '../../../interfaces/enum';
+import { CLUSTER_STYLE, HIGHLIGHT_COLOR } from '../../../interfaces/clusterStyle';
 
 function getTextWidth(text: string, font: string): number {
     const canvas = document.createElement('canvas');
@@ -45,12 +48,23 @@ export function sixDigitColor(bgColor: string): string {
     return '000000';
 }
 
+// Text of the rule row of a pi node: shows its component
+export function piLabel(clusterType: ClusterKind): string {
+    return clusterType === ClusterKind.NONE ? 'π' : `π ${CLUSTER_STYLE[clusterType].label}`;
+}
+
 const Node: React.FC<NodeProps> = (props: NodeProps): JSX.Element => {
     const {
         id,
+        stepId,
         conclusion,
         rule,
         args,
+        premises,
+        discharge,
+        anchorPath,
+        anchorArgs,
+        clusterType,
         x,
         y,
         nHided,
@@ -59,6 +73,7 @@ const Node: React.FC<NodeProps> = (props: NodeProps): JSX.Element => {
         dependencies,
         selected,
         color,
+        highlighted,
         setNodeOnFocus,
         toggleNodeSelection,
         updateNodePosition,
@@ -74,6 +89,13 @@ const Node: React.FC<NodeProps> = (props: NodeProps): JSX.Element => {
             } else {
                 openDrawer(
                     {
+                        id: id,
+                        stepId: stepId,
+                        premises: premises,
+                        discharge: discharge,
+                        anchorPath: anchorPath,
+                        anchorArgs: anchorArgs,
+                        clusterType: clusterType,
                         rule: rule,
                         args: args,
                         conclusion: conclusion,
@@ -106,8 +128,8 @@ const Node: React.FC<NodeProps> = (props: NodeProps): JSX.Element => {
     const style = {
         tag: {
             fill: bgColor,
-            stroke: selected ? 'red' : 'black',
-            strokeWidth: selected ? 3 : 1,
+            stroke: selected ? 'red' : highlighted ? HIGHLIGHT_COLOR : 'black',
+            strokeWidth: selected || highlighted ? 3 : 1,
         },
         get dep() {
             return { ...this.tag };
@@ -131,7 +153,7 @@ const Node: React.FC<NodeProps> = (props: NodeProps): JSX.Element => {
     const infos = {
         nHided: nHided ? `#hidden: ${nHided}` : '',
         nDescendants: ` #descendants: ${nDescendants}`,
-        rule: nHided ? 'π' : rule,
+        rule: nHided ? piLabel(clusterType) : rule,
         dependencies: dependencies.length === 1 ? String(dependencies[0].piId) : 'π',
     };
 
@@ -159,6 +181,9 @@ const Node: React.FC<NodeProps> = (props: NodeProps): JSX.Element => {
             y={y}
             onClick={handleClick}
         >
+            {stepId && !nHided ? (
+                <Text x={2} y={-14} fontSize={11} fill="#8a8a8a" text={stepId} listening={false} />
+            ) : null}
             <Label x={0} y={0}>
                 <Tag {...style.tag} />
                 <Text {...style.text} text={conclusion} />

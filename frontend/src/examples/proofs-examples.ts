@@ -1,12 +1,41 @@
-const examples: { [ex: string]: { dot: string; smt: string } } = {
-    ex1: {
-        dot: 'unsat\r\ndigraph proof {\r\n\trankdir="BT";\r\n\tnode [shape=record];\r\n\tcomment="{\\"letMap\\" : {\\"let1\\" : \\"(f b)\\", \\"let2\\" : \\"(= (f a) let1)\\", \\"let3\\" : \\"(not let2)\\", \\"let4\\" : \\"(or p let3)\\", \\"let5\\" : \\"(not p)\\", \\"let6\\" : \\"(= a b)\\", \\"let7\\" : \\"(= let1 let1)\\", \\"let8\\" : \\"(not let7)\\", \\"let9\\" : \\"(not true)\\", \\"let10\\" : \\"(= p false)\\"}}";\r\n\t0 [ label = "{(not (and let6 let5 let4))|SCOPE :args [ let6, let5, let4 ]}", comment = "{\\"subProofQty\\":21}" ];\r\n\t1 [ label = "{false|EQ_RESOLVE}", comment = "{\\"subProofQty\\":20}" ];\r\n\t2 [ label = "{let3|CHAIN_RESOLUTION :args [ true, p ]}", comment = "{\\"subProofQty\\":3}" ];\r\n\t3 [ label = "{let4|ASSUME}", comment = "{\\"subProofQty\\":1}" ];\r\n\t3 -> 2;\r\n\t4 [ label = "{let5|ASSUME}", comment = "{\\"subProofQty\\":1}" ];\r\n\t4 -> 2;\r\n\t2 -> 1;\r\n\t5 [ label = "{(= let3 false)|TRANS}", comment = "{\\"subProofQty\\":16}" ];\r\n\t6 [ label = "{(= let3 let8)|CONG :args [ not ]}", comment = "{\\"subProofQty\\":11}" ];\r\n\t7 [ label = "{(= let2 let7)|CONG :args [ = ]}", comment = "{\\"subProofQty\\":10}" ];\r\n\t8 [ label = "{let2|CONG :args [ f ]}", comment = "{\\"subProofQty\\":8}" ];\r\n\t9 [ label = "{let6|AND_ELIM :args [ 1 ]}", comment = "{\\"subProofQty\\":7}" ];\r\n\t10 [ label = "{(and let10 let6)|AND_INTRO}", comment = "{\\"subProofQty\\":6}" ];\r\n\t11 [ label = "{let10|EQ_RESOLVE}", comment = "{\\"subProofQty\\":4}" ];\r\n\t4 -> 11;\r\n\t12 [ label = "{(= let5 let10)|SYMM}", comment = "{\\"subProofQty\\":2}" ];\r\n\t13 [ label = "{(= let10 let5)|THEORY_REWRITE :args [ BOOL ]}", comment = "{\\"subProofQty\\":1}" ];\r\n\t13 -> 12;\r\n\t12 -> 11;\r\n\t11 -> 10;\r\n\t14 [ label = "{let6|ASSUME}", comment = "{\\"subProofQty\\":1}" ];\r\n\t14 -> 10;\r\n\t10 -> 9;\r\n\t9 -> 8;\r\n\t8 -> 7;\r\n\t15 [ label = "{let7|REFL}", comment = "{\\"subProofQty\\":1}" ];\r\n\t15 -> 7;\r\n\t7 -> 6;\r\n\t6 -> 5;\r\n\t16 [ label = "{(= let8 false)|TRANS}", comment = "{\\"subProofQty\\":4}" ];\r\n\t17 [ label = "{(= let8 let9)|CONG :args [ not ]}", comment = "{\\"subProofQty\\":2}" ];\r\n\t18 [ label = "{(= let7 true)|THEORY_REWRITE :args [ UF ]}", comment = "{\\"subProofQty\\":1}" ];\r\n\t18 -> 17;\r\n\t17 -> 16;\r\n\t19 [ label = "{(= let9 false)|THEORY_REWRITE :args [ BOOL ]}", comment = "{\\"subProofQty\\":1}" ];\r\n\t19 -> 16;\r\n\t16 -> 5;\r\n\t5 -> 1;\r\n\t1 -> 0;\r\n\r\n}\r\n',
-        smt: `(set-logic QF_UF)\n(set-info :category "crafted")\n(set-info :status unsat)\n(declare-sort U 0)\n(declare-fun a () U)\n(declare-fun b () U)\n(declare-fun f (U) U)\n(declare-fun p () Bool)\n(assert (= a b))\n(assert (not p))\n(assert (or p (not (= (f a) (f b)))))\n(check-sat)\n(exit)`,
+import eufCvc5 from '../alethe/__fixtures__/euf.alethe?raw';
+import eufCvc5Smt from '../alethe/__fixtures__/euf.smt2?raw';
+import liaCvc5 from '../alethe/__fixtures__/lia.alethe?raw';
+import liaCvc5Smt from '../alethe/__fixtures__/lia.smt2?raw';
+import qCvc5 from '../alethe/__fixtures__/q.alethe?raw';
+import qCvc5Smt from '../alethe/__fixtures__/q.smt2?raw';
+import skoCvc5 from '../alethe/__fixtures__/sko.alethe?raw';
+import skoCvc5Smt from '../alethe/__fixtures__/sko.smt2?raw';
+import ex1Cvc5 from '../alethe/__fixtures__/ex1.alethe?raw';
+import ex1Cvc5Smt from '../alethe/__fixtures__/ex1.smt2?raw';
+import eufVerit from '../alethe/__fixtures__/euf.verit.alethe?raw';
+import liaVerit from '../alethe/__fixtures__/lia.verit.alethe?raw';
+import qVerit from '../alethe/__fixtures__/q.verit.alethe?raw';
+
+export interface ProofExample {
+    id: string;
+    label: string;
+    // File name shown in the navbar
+    name: string;
+    alethe: string;
+    smt: string;
+}
+
+const examples: ProofExample[] = [
+    { id: 'euf', label: 'cvc5: EUF with theory lemmas', name: 'euf.alethe', alethe: eufCvc5, smt: eufCvc5Smt },
+    { id: 'lia', label: 'cvc5: linear integer arithmetic', name: 'lia.alethe', alethe: liaCvc5, smt: liaCvc5Smt },
+    { id: 'q', label: 'cvc5: quantifiers', name: 'q.alethe', alethe: qCvc5, smt: qCvc5Smt },
+    { id: 'sko', label: 'cvc5: skolemization', name: 'sko.alethe', alethe: skoCvc5, smt: skoCvc5Smt },
+    { id: 'ex1', label: 'cvc5: preprocessing and rewriting', name: 'ex1.alethe', alethe: ex1Cvc5, smt: ex1Cvc5Smt },
+    { id: 'euf.verit', label: 'veriT: EUF', name: 'euf.verit.alethe', alethe: eufVerit, smt: eufCvc5Smt },
+    {
+        id: 'lia.verit',
+        label: 'veriT: linear integer arithmetic',
+        name: 'lia.verit.alethe',
+        alethe: liaVerit,
+        smt: liaCvc5Smt,
     },
-    ex2: {
-        dot: 'unsat\r\ndigraph proof {\r\n\trankdir="BT";\r\n\tnode [shape=record];\r\n\tcomment="{\\"letMap\\" : {\\"let1\\" : \\"(= (f a) (f b))\\", \\"let2\\" : \\"(not let1)\\", \\"let3\\" : \\"(or (not p3) let2)\\", \\"let4\\" : \\"(and p2 p3)\\", \\"let5\\" : \\"(or (not p1) let4)\\", \\"let6\\" : \\"(and p1 true)\\", \\"let7\\" : \\"(= a b)\\", \\"let8\\" : \\"(not let4)\\", \\"let9\\" : \\"(not let7)\\"}}";\r\n\t0 [ label = "{(not (and let7 let6 let5 let3))|SCOPE :args [ let7, let6, let5, let3 ]}", comment = "{\\"subProofQty\\":20}" ];\r\n\t1 [ label = "{false|CHAIN_RESOLUTION :args [ true, let1, false, let7 ]}", comment = "{\\"subProofQty\\":19}" ];\r\n\t2 [ label = "{(or let1 let9)|REORDERING}", comment = "{\\"subProofQty\\":7}" ];\r\n\t3 [ label = "{(or let9 let1)|IMPLIES_ELIM}", comment = "{\\"subProofQty\\":6}" ];\r\n\t4 [ label = "{(=\\> let7 let1)|SCOPE :args [ let7 ]}", comment = "{\\"subProofQty\\":5}" ];\r\n\t5 [ label = "{let1|CONG :args [ f ]}", comment = "{\\"subProofQty\\":4}" ];\r\n\t6 [ label = "{let7|SYMM}", comment = "{\\"subProofQty\\":3}" ];\r\n\t7 [ label = "{(= b a)|SYMM}", comment = "{\\"subProofQty\\":2}" ];\r\n\t8 [ label = "{let7|ASSUME}", comment = "{\\"subProofQty\\":1}" ];\r\n\t8 -> 7;\r\n\t7 -> 6;\r\n\t6 -> 5;\r\n\t5 -> 4;\r\n\t4 -> 3;\r\n\t3 -> 2;\r\n\t2 -> 1;\r\n\t9 [ label = "{let2|CHAIN_RESOLUTION :args [ false, p3 ]}", comment = "{\\"subProofQty\\":10}" ];\r\n\t10 [ label = "{let3|ASSUME}", comment = "{\\"subProofQty\\":1}" ];\r\n\t10 -> 9;\r\n\t11 [ label = "{p3|CHAIN_RESOLUTION :args [ false, let4 ]}", comment = "{\\"subProofQty\\":8}" ];\r\n\t12 [ label = "{(or p3 let8)|REORDERING}", comment = "{\\"subProofQty\\":2}" ];\r\n\t13 [ label = "{(or let8 p3)|CNF_AND_POS :args [ let4, 1 ]}", comment = "{\\"subProofQty\\":1}" ];\r\n\t13 -> 12;\r\n\t12 -> 11;\r\n\t14 [ label = "{let4|CHAIN_RESOLUTION :args [ false, p1 ]}", comment = "{\\"subProofQty\\":5}" ];\r\n\t15 [ label = "{let5|ASSUME}", comment = "{\\"subProofQty\\":1}" ];\r\n\t15 -> 14;\r\n\t16 [ label = "{p1|EQ_RESOLVE}", comment = "{\\"subProofQty\\":3}" ];\r\n\t17 [ label = "{let6|ASSUME}", comment = "{\\"subProofQty\\":1}" ];\r\n\t17 -> 16;\r\n\t18 [ label = "{(= let6 p1)|THEORY_REWRITE :args [ BOOL ]}", comment = "{\\"subProofQty\\":1}" ];\r\n\t18 -> 16;\r\n\t16 -> 14;\r\n\t14 -> 11;\r\n\t11 -> 9;\r\n\t9 -> 1;\r\n\t19 [ label = "{let7|ASSUME}", comment = "{\\"subProofQty\\":1}" ];\r\n\t19 -> 1;\r\n\t1 -> 0;\r\n\r\n\tsubgraph cluster_SAT {\r\n\t\tlabel="SAT"\r\n\t\tbgcolor="purple"\r\n\t\t1 2 9 11 12 14 \r\n\t};\r\n\tsubgraph cluster_CNF {\r\n\t\tlabel="CNF"\r\n\t\tbgcolor="yellow"\r\n\t\t3 13 \r\n\t};\r\n\tsubgraph cluster_TL {\r\n\t\tlabel="TL"\r\n\t\tbgcolor="green"\r\n\t\t4 5 6 7 8 \r\n\t};\r\n\tsubgraph cluster_PP {\r\n\t\tlabel="PP"\r\n\t\tbgcolor="brown"\r\n\t\t16 18 \r\n\t};\r\n\tsubgraph cluster_IN {\r\n\t\tlabel="IN"\r\n\t\tbgcolor="blue"\r\n\t\t10 15 17 19 \r\n\t};\r\n}\r\n',
-        smt: `(set-logic QF_UF)\n\n(declare-sort U 0)\n\n(declare-const p1 Bool)\n(declare-const p2 Bool)\n(declare-const p3 Bool)\n\n(declare-const a U)\n(declare-const b U)\n(declare-fun f (U) U)\n\n(assert (= a b))\n(assert (and p1 true))\n(assert (or (not p1) (and p2 p3)))\n(assert (or (not p3) (not (= (f a) (f b)))))\n\n(check-sat)`,
-    },
-};
+    { id: 'q.verit', label: 'veriT: quantifiers', name: 'q.verit.alethe', alethe: qVerit, smt: qCvc5Smt },
+];
 
 export default examples;

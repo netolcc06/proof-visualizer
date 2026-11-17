@@ -1,4 +1,4 @@
-import { createSlice } from '@reduxjs/toolkit';
+import { createSelector, createSlice } from '@reduxjs/toolkit';
 import { RootState } from '../../store';
 import { piNodeChildren, piNodeParents, groupPiNodeDependencies } from './auxi';
 import { NodeInterface, ProofState } from '../../../interfaces/interfaces';
@@ -15,6 +15,7 @@ const initialState: ProofState = {
     visualInfo: {},
     nodesSelected: [],
     clustersInfos: [],
+    source: '',
     smt: '',
 };
 
@@ -38,14 +39,19 @@ export const {
     changeStyle,
     applyView,
     applyColor,
+    highlightSteps,
     moveNode,
     setSmt,
     undo,
 } = proofSlice.actions;
 
-export const selectProof = (state: RootState): NodeInterface[] => {
-    let proof = state.proof.proof;
-    const hiddenNodes = state.proof.hiddenNodes;
+export const selectProof = createSelector(
+    [(state: RootState) => state.proof.proof, (state: RootState) => state.proof.hiddenNodes],
+    (baseProof, hiddenNodes): NodeInterface[] => buildProof(baseProof, hiddenNodes),
+);
+
+const buildProof = (baseProof: NodeInterface[], hiddenNodes: number[][]): NodeInterface[] => {
+    let proof = baseProof;
 
     hiddenNodes.forEach((hiddenNodesArray) => {
         const dependencies: { [parentId: number]: number[] } = {};
@@ -56,6 +62,7 @@ export const selectProof = (state: RootState): NodeInterface[] => {
         const piNodeId = proof.length;
         proof = proof.concat({
             id: piNodeId,
+            stepId: `π${piNodeId}`,
             conclusion: '∴',
             rule: 'π',
             args: '',
@@ -65,6 +72,9 @@ export const selectProof = (state: RootState): NodeInterface[] => {
             descendants: 1,
             dependencies: piNodeDependencies,
             clusterType: ClusterKind.NONE,
+            discharge: [],
+            anchorPath: [],
+            anchorArgs: null,
         });
 
         const piNode = proof[piNodeId];
@@ -104,6 +114,10 @@ export const selectProof = (state: RootState): NodeInterface[] => {
             proof[node].parents.every((parentId) => piNode.parents.indexOf(parentId) !== -1),
         );
 
+        // A pi node of a single component shows that component
+        const types = new Set(hiddenNodesArray.map((node) => proof[node].clusterType));
+        if (types.size === 1) piNode.clusterType = [...types][0];
+
         // Get the conclusion array
         const conclusion = highHierarchyNodes.map((node) => ' ' + proof[node].conclusion);
         piNode.conclusion = conclusion.length > 1 ? `[${conclusion} ]` : `${conclusion}`;
@@ -141,6 +155,17 @@ export const selectStyle = (state: RootState): 'graph' | 'directory' => {
 export const selectLetMap = (state: RootState): { [Key: string]: string } => {
     return state.proof.letMap;
 };
+
+export const selectSource = (state: RootState): string => {
+    return state.proof.source;
+};
+
+// Number of proof nodes per component (the original proof, not the folded view)
+export const selectComponentCounts = createSelector([(state: RootState) => state.proof.proof], (proof) => {
+    const counts: { [kind: number]: number } = {};
+    proof.forEach((node) => (counts[node.clusterType] = (counts[node.clusterType] ?? 0) + 1));
+    return counts;
+});
 
 export const selectTheoryLemmas = (state: RootState): ProofState['theoryLemmaMap'] => {
     return state.proof.theoryLemmaMap;

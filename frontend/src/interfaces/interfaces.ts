@@ -1,11 +1,13 @@
+import type { JSX } from 'react';
 import { Dispatch, SetStateAction } from 'react';
 import { ActionCreatorWithPayload } from '@reduxjs/toolkit';
-import { TreeNodeInfo } from '@blueprintjs/core';
 import { renderLetKind, ClusterKind } from './enum';
+import type { SliceDialogState, SolverState } from '../store/features/solver/solverSlice';
 
 // NODES
 interface NodeInterface {
     id: number;
+    stepId: string;
     conclusion: string;
     rule: string;
     args: string;
@@ -16,9 +18,22 @@ interface NodeInterface {
     descendants: number;
     dependencies: { piId: number; depsId: number[] }[];
     clusterType: ClusterKind;
+    discharge: string[];
+    anchorPath: string[];
+    anchorArgs: string | null;
 }
 
-interface NodeProps {
+// Alethe details shown in the node info
+interface NodeDetails {
+    stepId: string;
+    premises: string[];
+    discharge: string[];
+    anchorPath: string[];
+    anchorArgs: string | null;
+    clusterType: ClusterKind;
+}
+
+interface NodeProps extends NodeDetails {
     id: NodeInterface['id'];
     conclusion: NodeInterface['conclusion'];
     rule: NodeInterface['rule'];
@@ -34,6 +49,7 @@ interface NodeProps {
 
     selected: boolean;
     color: string;
+    highlighted?: boolean;
 
     setNodeOnFocus: (id: number) => void;
     toggleNodeSelection: (id: number) => void;
@@ -44,7 +60,8 @@ interface NodeProps {
 }
 
 // Info passed to the info drawer
-interface NodeInfo {
+interface NodeInfo extends NodeDetails {
+    id: NodeProps['id'];
     rule: NodeProps['rule'];
     args: NodeProps['args'];
     conclusion: NodeProps['conclusion'];
@@ -74,6 +91,7 @@ interface CanvasPropsAndRedux extends CanvasProps {
     renderData: ExternalCmdState['renderData'];
     spinner: ExternalCmdState['spinner'];
     selectData: ExternalCmdState['selectData'];
+    regionCapture: boolean;
 
     hideNodes: ActionCreatorWithPayload<void, string>;
     unfoldNextNode: ActionCreatorWithPayload<number, string>;
@@ -86,9 +104,11 @@ interface CanvasPropsAndRedux extends CanvasProps {
     unselectByArea: ActionCreatorWithPayload<ExternalCmdState['selectData']['square'], string>;
     reRender: ActionCreatorWithPayload<void, string>;
     addRenderCount: ActionCreatorWithPayload<void, string>;
+    blockRender: ActionCreatorWithPayload<void, string>;
     blockRenderNewFile: ActionCreatorWithPayload<void, string>;
     setSpinner: ActionCreatorWithPayload<ExternalCmdState['spinner'], string>;
     undo: ActionCreatorWithPayload<void, string>;
+    openSliceDialog: ActionCreatorWithPayload<SliceDialogState | null, string>;
     selectNodes: ActionCreatorWithPayload<number[], string>;
     unselectNodes: ActionCreatorWithPayload<{ nodes: number[]; cleanAll: boolean }, string>;
     applyColor: ActionCreatorWithPayload<string, string>;
@@ -108,10 +128,7 @@ interface CanvasState {
 
 // DIRECTORY STYLE
 interface DirectoryStyleProps {
-    proofTree: TreeNodeInfo[];
     ruleHelper: (s: string) => string;
-    indent: (s: string) => string;
-    translate: (s: string) => string;
 }
 
 // SELECT OVERLAY
@@ -141,8 +158,9 @@ interface NavbarProps {
 
 interface NavbarPropsAndRedux extends NavbarProps {
     proof: ProofState['proof'];
-    dot: string;
-    view: string;
+    source: string;
+    smt: string;
+    view: ProofState['view'];
     visualInfo: ProofState['visualInfo'];
     hiddenNodes: number[][];
     hideNodes: ActionCreatorWithPayload<void, string>;
@@ -156,7 +174,7 @@ interface VisualizerDialogProps {
 }
 
 // TREENODE
-interface TreeNode {
+interface TreeNode extends NodeDetails {
     id: NodeProps['id'];
     conclusion: NodeProps['conclusion'];
     rule: NodeProps['rule'];
@@ -167,6 +185,8 @@ interface TreeNode {
     dependencies: NodeProps['dependencies'];
 
     icon: 'graph';
+    isSelected?: boolean;
+    isExpanded?: boolean;
     label: string;
     secondaryLabel: string;
     hasCaret: boolean | undefined;
@@ -179,7 +199,9 @@ interface TreeProps {
     darkTheme: boolean;
     proof: ProofState['proof'];
     positionMap: any;
-    content: TreeNodeInfo[];
+    content: TreeNode[];
+    // Start with the root node expanded
+    expandRoot?: boolean;
     setNodeInfo: Dispatch<SetStateAction<NodeInfo>>;
 }
 
@@ -210,13 +232,13 @@ interface DrawerProps {
     setDrawerIsOpen: Dispatch<SetStateAction<boolean>>;
 }
 
-// SMT DRAWER
+// SMT PANEL (floating)
 interface SmtDrawerProps {
     isOpen: boolean;
     setDrawerIsOpen: Dispatch<SetStateAction<boolean>>;
-    addErrorToast: (err: string) => void;
-    smtOptions: { argsType: boolean; customArgs: string };
-    setSmtOptions: Dispatch<SetStateAction<SmtDrawerProps['smtOptions']>>;
+    // Set when Carcara needs the SMT problem: expands a minimized panel
+    expandRequested?: boolean;
+    onExpandHandled?: () => void;
 }
 
 // TUTORIAL PROPS
@@ -244,6 +266,7 @@ interface ReduxState {
     proof: ProofState;
     theme: ThemeState;
     externalCmd: ExternalCmdState;
+    solver: SolverState;
 }
 // PROOFS
 interface ProofState {
@@ -261,9 +284,13 @@ interface ProofState {
             x: number;
             y: number;
             selected: boolean;
+            // Border mark (e.g. steps added by a spliced slice)
+            highlighted?: boolean;
         };
     };
     nodesSelected: number[];
+    // Raw Alethe text of the loaded proof
+    source: string;
     clustersInfos: {
         hiddenNodes: number[];
         type: ClusterKind;
@@ -291,12 +318,16 @@ interface ExternalCmdState {
         count: number;
         fileChanged: boolean;
     };
-    spinner: 'off' | 'cvc5' | 'render';
+    spinner: 'off' | 'busy' | 'render';
+    busyLabel: string;
     selectData: { type: boolean; square: SelectionSquare };
+    // Image region capture mode (Download > Select region)
+    regionCapture: boolean;
 }
 
 export type {
     NodeInterface,
+    NodeDetails,
     NodeProps,
     NodeInfo,
     VisualizerStageProps,

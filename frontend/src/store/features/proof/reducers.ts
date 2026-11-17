@@ -1,14 +1,14 @@
 import { FoldUndo, HideUndo, UnfoldUndo } from './../../../interfaces/undoClasses';
 import { Draft, PayloadAction } from '@reduxjs/toolkit';
-import { processDot, descendants, findNodesClusters, sliceNodesCluster, extractTheoryLemmas } from './auxi';
+import { descendants, findNodesClusters, sliceNodesCluster, extractTheoryLemmas } from './auxi';
+import type { ProcessPayload } from './alethe';
+import { CLUSTER_STYLE } from '../../../interfaces/clusterStyle';
 import { ExternalCmdState, ProofState } from '../../../interfaces/interfaces';
-import { colorConverter } from '../theme/auxi';
 import { BaseUndo, ColorUndo, MoveUndo } from '../../../interfaces/undoClasses';
-import Deque from 'double-ended-queue';
 
 const STACK_MAX_SIZE = 20;
 const LARGE_PROOF_SIZE = 1000 as const;
-const undoQueue = new Deque<BaseUndo>();
+const undoQueue: BaseUndo[] = [];
 
 function addUndo(undo: BaseUndo): void {
     // Ensures max size
@@ -18,7 +18,7 @@ function addUndo(undo: BaseUndo): void {
 }
 
 function clearUndo(): void {
-    undoQueue.clear();
+    undoQueue.length = 0;
 }
 
 function clearHiddenNodes(state: Draft<ProofState>, action: PayloadAction<null>): void {
@@ -26,65 +26,46 @@ function clearHiddenNodes(state: Draft<ProofState>, action: PayloadAction<null>)
     state.hiddenNodes = [];
 }
 
-function process(state: Draft<ProofState>, action: PayloadAction<string>): void {
+// Color of the root node in the component views
+function rootColor(state: Draft<ProofState>): string {
+    return CLUSTER_STYLE[state.proof[0].clusterType]?.color ?? '#fff';
+}
+
+function process(state: Draft<ProofState>, action: PayloadAction<ProcessPayload>): void {
+    const { nodes, letMap, source, session } = action.payload;
+
     // Reset the state
+    clearUndo();
     state.clustersInfos = [];
     state.nodesSelected = [];
     state.hiddenNodes = [];
-
-    let proofJSON;
-    let dot = action.payload;
-    let isJSON = false;
-
-    // If the payload is a .json file
-    if (dot.indexOf('{"dot":"') !== -1) {
-        proofJSON = JSON.parse(dot);
-        dot = proofJSON.dot;
-        isJSON = true;
-    }
-
-    const [proof, letMap, clustersColors] = processDot(dot);
-    state.proof = proof;
+    state.proof = nodes;
     state.letMap = letMap;
+    state.source = source;
     state.view = 'full';
 
-    // If there are clusters
-    let clusters: number[][] = [];
-    if (Object.keys(clustersColors).length) {
-        state.view = 'clustered';
+    // Slice the inferred components into clusters
+    const clustersMap: number[] = Array(nodes.length).fill(-1);
+    const clusters = sliceNodesCluster(state.proof, clustersMap);
+    clusters.forEach((cluster) => {
+        const type = state.proof[cluster[0]].clusterType;
+        state.clustersInfos.push({ hiddenNodes: cluster, type, color: CLUSTER_STYLE[type].color });
+    });
+    state.theoryLemmaMap = extractTheoryLemmas(state.proof, state.clustersInfos);
 
-        // Slice the clusters
-        const clustersMap: number[] = Array(state.proof.length).fill(-1);
-        clusters = sliceNodesCluster(state.proof, clustersMap);
+    // Clustered view is the default when there is more than one component
+    if (new Set(nodes.map((n) => n.clusterType)).size > 1) state.view = 'clustered';
 
-        // Maps the cluster infos
-        clusters.forEach((cluster) => {
-            const type = state.proof[cluster[0]].clusterType;
-            state.clustersInfos.push({
-                hiddenNodes: cluster,
-                type: type,
-                color: colorConverter(clustersColors[type]),
-            });
-        });
-
-        // Extract the theory lemmas
-        state.theoryLemmaMap = extractTheoryLemmas(state.proof, state.clustersInfos, true);
-    } else {
-        state.theoryLemmaMap = extractTheoryLemmas(state.proof, state.clustersInfos, false);
-    }
-
-    if (isJSON) {
-        state.view = proofJSON.view;
-        state.hiddenNodes = proofJSON.hiddenNodes;
-        state.visualInfo = proofJSON.visualInfo;
+    if (session) {
+        state.view = session.view;
+        state.hiddenNodes = session.hiddenNodes;
+        state.visualInfo = session.visualInfo;
         // Make sure the nodes that were selected stay selected
         const size = state.proof.length + state.hiddenNodes.length;
         for (let i = 0; i < size; i++) {
             if (state.visualInfo[i].selected) state.nodesSelected.push(i);
         }
-    }
-    // Is .dot
-    else {
+    } else {
         // Init the visual info
         state.visualInfo = {};
         state.proof.forEach((node) => {
@@ -96,20 +77,23 @@ function process(state: Draft<ProofState>, action: PayloadAction<string>): void 
             };
         });
 
-        let size = state.proof.length;
-        state.clustersInfos.forEach(({ hiddenNodes, color }) => {
-            let index;
-            if (hiddenNodes.length > 1) {
-                state.hiddenNodes.push(hiddenNodes);
-                index = size++;
-            } else index = hiddenNodes[0];
-            state.visualInfo[index] = {
-                color: color,
-                x: 0,
-                y: 0,
-                selected: false,
-            };
-        });
+        if (state.view === 'clustered') {
+            state.visualInfo[0].color = rootColor(state);
+            let size = state.proof.length;
+            state.clustersInfos.forEach(({ hiddenNodes, color }) => {
+                let index;
+                if (hiddenNodes.length > 1) {
+                    state.hiddenNodes.push(hiddenNodes);
+                    index = size++;
+                } else index = hiddenNodes[0];
+                state.visualInfo[index] = {
+                    color: color,
+                    x: 0,
+                    y: 0,
+                    selected: false,
+                };
+            });
+        }
     }
     // Set all the hidden nodes as hidden
     state.hiddenNodes.forEach((hiddenNodesArray, i) => {
@@ -118,7 +102,7 @@ function process(state: Draft<ProofState>, action: PayloadAction<string>): void 
     });
 
     // Fold nodes if proof is too large
-    if (state.proof.length > LARGE_PROOF_SIZE) {
+    if (!session && state.proof.length > LARGE_PROOF_SIZE) {
         let piNode = { id: -1, max: -1 };
         state.proof.forEach((node) => {
             // id >=5 is an arbitrary value
@@ -261,7 +245,7 @@ function unfoldNodes(state: Draft<ProofState>, action: PayloadAction<number>): v
 function unfoldNextNode(state: Draft<ProofState>, action: PayloadAction<number>): void {
     const pi = action.payload;
     const hiddenID = pi - state.proof.length;
-    const hiddens = state.hiddenNodes[hiddenID];
+    const hiddens = [...state.hiddenNodes[hiddenID]];
     const size = state.proof.length + state.hiddenNodes.length;
     const color = state.visualInfo[pi].color;
 
@@ -271,81 +255,64 @@ function unfoldNextNode(state: Draft<ProofState>, action: PayloadAction<number>)
         pos.push({ id: id, x: state.visualInfo[id].x, y: state.visualInfo[id].y });
     }
 
-    // Unselect the hidden nodes and set their color equal to the pi node
+    // Shows a node with the pi color (a manually folded pi keeps the nodes' own colors)
     const colors: { id: number; color: string }[] = [];
-    const firstHidden = hiddens[0];
-    // Save all the hidden nodes colors
-    colors.push({ id: firstHidden, color: state.visualInfo[firstHidden].color });
-    // Signalize nodes are unhided
-    state.proof[firstHidden].isHidden = undefined;
-    state.visualInfo[firstHidden] = {
-        ...state.visualInfo[firstHidden],
-        color: color !== '#555' ? color : state.visualInfo[firstHidden].color,
-        selected: false,
+    const reveal = (id: number): void => {
+        // Save the hidden node color
+        colors.push({ id: id, color: state.visualInfo[id].color });
+        // Signalize node is unhided
+        state.proof[id].isHidden = undefined;
+        state.visualInfo[id] = {
+            ...state.visualInfo[id],
+            color: color !== '#555' ? color : state.visualInfo[id].color,
+            selected: false,
+        };
     };
-    colors.push({ id: pi, color: color });
-    state.hiddenNodes[hiddenID].splice(0, 1);
 
-    // we need to call findNodeClusters to find out if the hidden nodes are clusterable.
-    // if they are clusterable, we can just show the next node.
-    // Otherwise, we need to show all the hidden nodes
-    const nodeClusters = findNodesClusters(state.proof, state.hiddenNodes[hiddenID]);
+    const [firstHidden, ...rest] = hiddens;
+    reveal(firstHidden);
+
+    // If the remaining hidden nodes are still clusterable we keep them folded.
+    // Otherwise, we need to show all of them
+    const nodeClusters = findNodesClusters(state.proof, rest);
+
+    // Remove the pi node: the pi nodes above it shift down by one
+    state.hiddenNodes.splice(hiddenID, 1);
+    for (let i = pi; i < size - 1; i++) {
+        state.visualInfo[i] = state.visualInfo[i + 1];
+    }
+    delete state.visualInfo[size - 1];
+
     if (nodeClusters.length) {
-        // Save the hidden nodes before we mutate it
-        // It will be used to reset the isHidden status of the nodes that are not longer hidden
-        const prevHiddenNodes = state.hiddenNodes[hiddenID];
+        // Nodes that dropped out of every cluster become visible
+        const clustered = new Set(nodeClusters.reduce((acc: number[], cluster) => acc.concat(cluster), []));
+        rest.forEach((id) => {
+            if (!clustered.has(id)) reveal(id);
+        });
 
-        // Remove the pi node array
-        state.hiddenNodes.splice(hiddenID, 1);
-
-        // add the clusters to the hidden nodes state
-        nodeClusters.forEach((cluster) => {
+        // The new pi nodes take the ids after the shifted ones
+        nodeClusters.forEach((cluster, i) => {
             state.hiddenNodes.push(cluster);
-        });
-
-        // Contains all the nodes that should be hidden
-        const flatSet = new Set();
-        state.hiddenNodes.forEach((hidVec) => hidVec.forEach((node) => flatSet.add(node)));
-        prevHiddenNodes.forEach((node) => {
-            // If the current node was removed from any of the clusters, then we should set him as visible
-            if (!flatSet.has(node)) {
-                state.proof[node].isHidden = undefined;
-            }
-        });
-
-        // update visual info
-        nodeClusters.forEach((_cluster, i) => {
-            const piID = size + i;
-            state.visualInfo[piID] = {
-                color: '#555',
+            state.visualInfo[size - 1 + i] = {
+                color: color,
                 x: 0,
                 y: 0,
                 selected: false,
             };
         });
     } else {
-        // Updates all the hidden nodes infos since they are no longer hidden
-        state.hiddenNodes[hiddenID].forEach((id) => {
-            // Save all the hidden nodes colors
-            colors.push({ id: id, color: state.visualInfo[id].color });
-            // Signalize nodes are unhided
-            state.proof[id].isHidden = undefined;
-            // update visual info
-            state.visualInfo[id] = {
-                ...state.visualInfo[id],
-                color: color !== '#555' ? color : state.visualInfo[id].color,
-                selected: false,
-            };
-        });
-        // Removes this pi node
-        state.hiddenNodes.splice(hiddenID, 1);
+        rest.forEach(reveal);
     }
-    // Make sure the ids are realocated
-    for (let i = pi; i < size - 1; i++) {
-        state.visualInfo[i] = state.visualInfo[i + 1];
-    }
+
+    // Keep the hidden nodes pointing to their (possibly shifted) pi node
+    state.hiddenNodes.forEach((hiddenArray, i) => {
+        hiddenArray.forEach((id) => (state.proof[id].isHidden = state.proof.length + i));
+    });
+
+    // The pi node must be the last color entry (see undo)
+    colors.push({ id: pi, color: color });
     // Add undo action
-    addUndo(new UnfoldUndo([...hiddens], pos, colors));
+    addUndo(new UnfoldUndo(hiddens, pos, colors));
     // Unselect all the nodes
     unselectNodes(state, { payload: { nodes: state.nodesSelected, cleanAll: true }, type: 'string' });
 }
@@ -426,6 +393,11 @@ function changeStyle(state: Draft<ProofState>, action: PayloadAction<ProofState[
     }
 }
 
+// Border mark that survives the visual info rebuilds of applyView
+function keepHighlight(state: Draft<ProofState>, id: number): { highlighted?: boolean } {
+    return state.visualInfo[id]?.highlighted ? { highlighted: true } : {};
+}
+
 function applyView(state: Draft<ProofState>, action: PayloadAction<ProofState['view']>): void {
     // Unselect all the nodes
     unselectNodes(state, { payload: { nodes: state.nodesSelected, cleanAll: true }, type: 'string' });
@@ -438,13 +410,14 @@ function applyView(state: Draft<ProofState>, action: PayloadAction<ProofState['v
     switch (action.payload) {
         // View without hidden Nodes
         case 'full':
-            if (state.hiddenNodes.length || state.view === 'colored-full') {
+            if (state.hiddenNodes.length || state.view !== 'full') {
                 state.proof.forEach((node) => {
                     state.visualInfo[node.id] = {
                         color: '#fff',
                         x: 0,
                         y: 0,
                         selected: false,
+                        ...keepHighlight(state, node.id),
                     };
                 });
 
@@ -459,6 +432,7 @@ function applyView(state: Draft<ProofState>, action: PayloadAction<ProofState['v
                 state.view = 'clustered';
 
                 clearHiddenNodes(state, { payload: null, type: 'string' });
+                state.visualInfo[0] = { ...state.visualInfo[0], color: rootColor(state) };
                 let size = state.proof.length;
 
                 state.clustersInfos.forEach(({ hiddenNodes, color }) => {
@@ -476,6 +450,7 @@ function applyView(state: Draft<ProofState>, action: PayloadAction<ProofState['v
                         x: 0,
                         y: 0,
                         selected: false,
+                        ...keepHighlight(state, index),
                     };
                 });
             }
@@ -487,6 +462,7 @@ function applyView(state: Draft<ProofState>, action: PayloadAction<ProofState['v
 
             // If there are clusters infos
             if (state.clustersInfos.length) {
+                state.visualInfo[0] = { ...state.visualInfo[0], color: rootColor(state) };
                 state.clustersInfos.forEach((cluster) => {
                     cluster.hiddenNodes.forEach((node) => {
                         state.visualInfo[node] = {
@@ -494,6 +470,7 @@ function applyView(state: Draft<ProofState>, action: PayloadAction<ProofState['v
                             x: 0,
                             y: 0,
                             selected: false,
+                            ...keepHighlight(state, node),
                         };
                     });
                 });
@@ -518,6 +495,14 @@ function applyColor(state: Draft<ProofState>, action: PayloadAction<string>): vo
     if (state.nodesSelected.length) addUndo(new ColorUndo([], colorMap));
     // Unselect all the nodes
     unselectNodes(state, { payload: { nodes: state.nodesSelected, cleanAll: true }, type: 'string' });
+}
+
+// Marks the nodes with the given Alethe step ids with a border (not undoable)
+function highlightSteps(state: Draft<ProofState>, action: PayloadAction<{ stepIds: string[] }>): void {
+    const ids = new Set(action.payload.stepIds);
+    state.proof.forEach((node) => {
+        if (ids.has(node.stepId) && state.visualInfo[node.id]) state.visualInfo[node.id].highlighted = true;
+    });
 }
 
 function moveNode(state: Draft<ProofState>, action: PayloadAction<{ id: number; x: number; y: number }>): void {
@@ -624,6 +609,7 @@ const reducers = {
     changeStyle,
     applyView,
     applyColor,
+    highlightSteps,
     moveNode,
     setSmt,
     undo,

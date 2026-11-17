@@ -1,4 +1,4 @@
-.bp3-drawer {
+.bp6-drawer {
     width: 65%;
     height: max-content !important;
     margin: auto !important;
@@ -28,4 +28,57 @@
     #pre-rule {
         white-space: pre-wrap;
     }
+}
+
+.component-legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+
+    li {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 1px 0;
+    }
+
+    li.clickable:hover {
+        cursor: pointer;
+        color: #48aff0;
+    }
+
+    .swatch {
+        width: 12px;
+        height: 12px;
+        border: 1px solid #555;
+        border-radius: 2px;
+        flex: none;
+    }
+
+    .count {
+        margin-left: auto;
+        padding-left: 12px;
+        opacity: 0.7;
+        font-variant-numeric: tabular-nums;
+    }
+
+    &.floating {
+        position: fixed;
+        left: 12px;
+        bottom: 12px;
+        z-index: 10;
+        min-width: 190px;
+        padding: 8px 10px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.92);
+        color: #1c2127;
+        box-shadow: 0 0 0 1px rgba(17, 20, 24, 0.15);
+    }
+}
+
+.bp6-dark .component-legend.floating {
+    background: rgba(37, 42, 49, 0.92);
+    color: #f6f7f9;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
 }

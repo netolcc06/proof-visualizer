@@ -1,3 +1,4 @@
+import { whenReady } from '../whenReady';
 import React, { useEffect, useState } from 'react';
 
 import '../../scss/VisualizersDrawer.scss';
@@ -11,6 +12,7 @@ import { reRender } from '../../store/features/externalCmd/externalCmd';
 import VisualizerLetDrawer from '../VisualizerLetDrawer/VisualizerLetDrawer';
 import VisualizerTheoryLemma from '../VisualizerTheoryLemma/VisualizerTheoryLemma';
 import { ClusterKind } from '../../interfaces/enum';
+import ComponentLegend from '../VisualizerStage/ComponentLegend';
 
 const VisualizersDrawer: React.FC<DrawerProps> = ({ drawerIsOpen, setDrawerIsOpen }: DrawerProps) => {
     const darkTheme = useAppSelector(selectTheme);
@@ -22,11 +24,10 @@ const VisualizersDrawer: React.FC<DrawerProps> = ({ drawerIsOpen, setDrawerIsOpe
 
     useEffect(() => {
         // When drawer is initialized it focus the escape button
-        const bt = document
-            .getElementsByClassName('visualizers-drawer')[0]
-            .getElementsByClassName('bp3-button')[0] as HTMLElement;
-        bt.tabIndex = 1;
-        bt.focus();
+        return whenReady('.visualizers-drawer .' + Classes.BUTTON, (el) => {
+            (el as HTMLElement).tabIndex = 1;
+            (el as HTMLElement).focus();
+        });
     }, []);
 
     const handleTabChange = (newTabId: string, _: any, e: any): void => {
@@ -38,15 +39,11 @@ const VisualizersDrawer: React.FC<DrawerProps> = ({ drawerIsOpen, setDrawerIsOpe
     };
 
     const handleClusterClick = (type: ClusterKind): void => {
-        if (type === ClusterKind.NONE) {
-            dispatch(selectNodes(nodeClusters.reduce((acc: number[], c) => acc.concat(c.hiddenNodes), [])));
-        } else {
-            dispatch(
-                selectNodes(
-                    nodeClusters.reduce((acc: number[], c) => (c.type === type ? acc.concat(c.hiddenNodes) : acc), []),
-                ),
-            );
-        }
+        dispatch(
+            selectNodes(
+                nodeClusters.reduce((acc: number[], c) => (c.type === type ? acc.concat(c.hiddenNodes) : acc), []),
+            ),
+        );
     };
 
     const menus = {
@@ -79,12 +76,7 @@ const VisualizersDrawer: React.FC<DrawerProps> = ({ drawerIsOpen, setDrawerIsOpe
                     />
                 </div>
                 <div className="views-color-map">
-                    <span onClick={() => handleClusterClick(ClusterKind.NONE)}>⬜ First Scope</span>
-                    <span onClick={() => handleClusterClick(ClusterKind.SAT)}>🟪 SAT</span>
-                    <span onClick={() => handleClusterClick(ClusterKind.CNF)}>🟨 CNF</span>
-                    <span onClick={() => handleClusterClick(ClusterKind.TL)}>🟩 Theory Lemma</span>
-                    <span onClick={() => handleClusterClick(ClusterKind.PP)}>🟫 Pre Processing</span>
-                    <span onClick={() => handleClusterClick(ClusterKind.IN)}>🟦 Input</span>
+                    <ComponentLegend onSelect={handleClusterClick} />
                 </div>
             </div>
         ),
@@ -94,7 +86,7 @@ const VisualizersDrawer: React.FC<DrawerProps> = ({ drawerIsOpen, setDrawerIsOpe
 
     return (
         <Drawer
-            className={`visualizers-drawer ${darkTheme ? 'bp3-dark' : ''}`}
+            className={`visualizers-drawer ${darkTheme ? Classes.DARK : ''}`}
             style={{ maxHeight: '65%', width: '35%' }}
             autoFocus={true}
             canEscapeKeyClose={true}

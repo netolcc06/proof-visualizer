@@ -1,8 +1,8 @@
+import type { JSX } from 'react';
 import React, { useEffect, useRef, useState } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { connect } from 'react-redux';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
-import { selectDot, selectFileName, set } from '../../store/features/file/fileSlice';
+import { selectFileName } from '../../store/features/file/fileSlice';
 import {
     applyView,
     changeStyle,
@@ -16,18 +16,34 @@ import {
     selectHiddenNodes,
     selectView,
     unselectNodes,
-    process,
-    setSmt,
+    selectSource,
+    selectSmt,
+    selectStyle,
 } from '../../store/features/proof/proofSlice';
+import { loadProof } from '../../store/features/proof/loadProof';
+import { buildSession } from '../../store/features/proof/alethe';
 import { ReduxState, NavbarPropsAndRedux, NavbarProps } from '../../interfaces/interfaces';
 
-import { Alignment, Button, Icon, InputGroup, Navbar, Switch, Menu, MenuItem } from '@blueprintjs/core';
-import { Popover2 } from '@blueprintjs/popover2';
+import {
+    Alignment,
+    Button,
+    Icon,
+    InputGroup,
+    Navbar,
+    PopoverNext as Popover,
+    Switch,
+    Menu,
+    MenuItem,
+} from '@blueprintjs/core';
+
 import { selectTheme, toggle } from '../../store/features/theme/themeSlice';
 import '../../scss/VisualizerNavbar.scss';
-import { allowRenderNewFile, findNode, reRender } from '../../store/features/externalCmd/externalCmd';
-import examples from '../../examples/proofs-examples';
-import { ConvertToSVG } from './SVGConverter';
+import { findNode, reRender, setRegionCapture } from '../../store/features/externalCmd/externalCmd';
+import examples, { ProofExample } from '../../examples/proofs-examples';
+import { downloadBlob, exportGraphImage } from '../VisualizerStage/Canvas/exportImage';
+import { parseAlethe, printAlethe } from '../../alethe';
+import { selectHistory, setRareDialogOpen, showToast } from '../../store/features/solver/solverSlice';
+import { checkProofAction, elaborateProofAction, revertProof } from '../../store/features/solver/actions';
 
 function useWindowSize() {
     // Initialize state with undefined width/height so server and client renders match
@@ -55,25 +71,6 @@ function useWindowSize() {
     return windowSize;
 }
 
-function isNotMozzila() {
-    const userAgent = navigator.userAgent;
-    let browserName;
-
-    if (userAgent.match(/chrome|chromium|crios/i)) {
-        return true;
-    } else if (userAgent.match(/firefox|fxios/i)) {
-        return false;
-    } else if (userAgent.match(/safari/i)) {
-        return true;
-    } else if (userAgent.match(/opr\//i)) {
-        return true;
-    } else if (userAgent.match(/edg/i)) {
-        return true;
-    }
-    return browserName;
-}
-const isNotMozz = isNotMozzila();
-
 const colorMap: { [name: string]: string } = {
     red: '#f72b34',
     orange: '#ff8334',
@@ -95,7 +92,8 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
     inTutorial,
     visualInfo,
     proof,
-    dot,
+    source,
+    smt,
     view,
     hiddenNodes,
     hideNodes,
@@ -103,6 +101,7 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
     const fileName = useAppSelector(selectFileName);
     const darkTheme = useAppSelector(selectTheme);
     const windowSize = useWindowSize();
+    const history = useAppSelector(selectHistory);
     const [command, setCommand] = useState('');
     const [lastCommands, setLastCommands] = useState(['']);
     const [commandId, setCommandId] = useState(0);
@@ -133,7 +132,7 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
                 let cmdArg = '';
                 cmds.forEach((string, id) => id !== 0 && (cmdArg += string + ' '));
                 // Matches all the brackets
-                const matches = [...cmdArg.matchAll(/\[([^\[\]]+)\]/g)];
+                const matches = [...cmdArg.matchAll(/\[([^[\]]+)\]/g)];
                 let idList: number[] = [];
 
                 // There is a case with brackets
@@ -164,7 +163,7 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
                     }
                 } else {
                     // Is a regex select?
-                    const matches = [...cmdArg.matchAll(/\/[^\/]*\//g)];
+                    const matches = [...cmdArg.matchAll(/\/[^/]*\//g)];
                     const argMatch = [...cmdArg.matchAll(/--(c|r)/g)];
                     // If there is a regex
                     if (matches[0]) {
@@ -279,7 +278,7 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
     const renderMatchableCmd = () => {
         if (matchableCmd.length) {
             const list: JSX.Element[] = [];
-            matchableCmd.forEach((cmd) => list.push(<MenuItem text={cmd} />));
+            matchableCmd.forEach((cmd) => list.push(<MenuItem key={cmd} text={cmd} />));
             return <Menu className="matchable-menu">{list}</Menu>;
         }
         return <></>;
@@ -330,58 +329,39 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
         }
     };
 
+    const baseName = (): string => (fileName ? fileName.split('.')[0].replace(/\s+/g, '_') : 'proof');
+
     const exportJSON = () => {
-        const downloadJSON = {
-            dot: dot,
-            visualInfo: visualInfo,
-            hiddenNodes: hiddenNodes,
-            view: view,
-        };
-        const fName = fileName.split('.')[0].replace(/\s+/g, '_');
-
-        const link = document.createElement('a');
-        link.download = fName + '.json';
-        link.href = `data:attachment/text,${encodeURIComponent(JSON.stringify(downloadJSON))}`;
-        link.click();
+        const session = buildSession(fileName, source, smt, { view, hiddenNodes, visualInfo });
+        downloadBlob(`${baseName()}.json`, JSON.stringify(session), 'application/json');
     };
 
-    const exportPNG = (e: React.MouseEvent<HTMLElement, MouseEvent> | null) => {
-        e?.preventDefault();
-        const link = document.createElement('a');
-        link.download = fileName ? `${fileName.split('.')[0].replace(/\s+/g, '_')}.png` : '';
-        const graph = document.getElementsByClassName('konvajs-content');
-        if (graph.length) {
-            link.href = (graph[0].children[0] as HTMLCanvasElement).toDataURL('image/png');
-            link.click();
+    const exportAlethe = () => {
+        let text = source;
+        try {
+            text = printAlethe(parseAlethe(source));
+        } catch {
+            // Keep the original text
         }
+        downloadBlob(`${baseName()}.alethe`, text, 'text/plain');
     };
 
-    const exportSVG = (e: React.MouseEvent<HTMLElement, MouseEvent> | null) => {
+    const isGraph = useAppSelector(selectStyle) === 'graph';
+
+    const exportImage = (format: 'png' | 'svg') =>
+        void exportGraphImage({
+            format,
+            proof,
+            visualInfo,
+            baseName: baseName(),
+            notify: (intent, message) => dispatch(showToast({ intent, message })),
+        });
+
+    const runExample = (e: React.MouseEvent<HTMLElement, MouseEvent> | null, example: ProofExample) => {
         e?.preventDefault();
-
-        const el = ConvertToSVG(proof, visualInfo);
-        const svg = renderToStaticMarkup(el);
-
-        // Download the svg content
-        const base64doc = btoa(unescape(encodeURIComponent(svg)));
-        const a = document.createElement('a');
-        a.download = fileName ? `${fileName.split('.')[0].replace(/\s+/g, '_')}.svg` : 'download.svg';
-        a.href = 'data:image/svg+xml;base64,' + base64doc;
-        a.click();
-    };
-
-    const runExample = (e: React.MouseEvent<HTMLElement, MouseEvent> | null, ex: string, id: number) => {
-        e?.preventDefault();
-        const dot = examples[ex].dot;
-        const smt = examples[ex].smt;
-
-        dispatch(set({ name: `ex-${id + 1}.dot`, value: dot }));
-        dispatch(allowRenderNewFile());
-        dispatch(reRender());
-        dispatch(setSmt(smt));
-
-        dispatch(process(dot));
-        setSmtDrawerIsOpen(true);
+        const result = dispatch(loadProof({ name: example.name, text: example.alethe, smt: example.smt }));
+        if (!result.ok) addErrorToast(result.error);
+        else setSmtDrawerIsOpen(true);
     };
 
     const isPseudoClick = (e: React.KeyboardEvent<HTMLAnchorElement>): boolean => e.key === 'Enter' || e.key === ' ';
@@ -413,7 +393,7 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
             <Menu className="nav-menu">
                 <MenuItem
                     icon="layout"
-                    text="JSON"
+                    text="Session (JSON)"
                     onClick={exportJSON}
                     role="button"
                     onKeyDown={(e) => {
@@ -422,25 +402,49 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
                 />
                 <MenuItem
                     icon="graph"
-                    text="DOT"
-                    href={`data:attachment/text,${encodeURIComponent(dot ? dot : '')}`}
-                    download={fileName ? `${fileName.split('.')[0].replace(/\s+/g, '_')}.dot` : ''}
+                    text="Alethe"
+                    onClick={exportAlethe}
+                    role="button"
+                    onKeyDown={(e) => {
+                        (e.key == 'Enter' || e.key == ' ') && exportAlethe();
+                    }}
                 />
                 <MenuItem
-                    icon="square"
-                    text="PNG"
-                    onClick={exportPNG}
-                    onKeyDown={(e) => {
-                        (e.key == 'Enter' || e.key == ' ') && exportPNG(null);
-                    }}
+                    icon="media"
+                    text="PNG — whole graph"
+                    disabled={!isGraph}
+                    label={isGraph ? undefined : 'Graph style only'}
+                    onClick={() => exportImage('png')}
+                    onKeyDown={(e) => isPseudoClick(e) && exportImage('png')}
                 />
                 <MenuItem
                     icon="widget"
-                    text="SVG"
-                    onClick={exportSVG}
-                    onKeyDown={(e) => {
-                        (e.key == 'Enter' || e.key == ' ') && exportSVG(null);
-                    }}
+                    text="SVG — whole graph"
+                    disabled={!isGraph}
+                    label={isGraph ? undefined : 'Graph style only'}
+                    onClick={() => exportImage('svg')}
+                    onKeyDown={(e) => isPseudoClick(e) && exportImage('svg')}
+                />
+                <MenuItem
+                    icon="select"
+                    text="Select region…"
+                    disabled={!isGraph}
+                    label={isGraph ? undefined : 'Graph style only'}
+                    onClick={() => dispatch(setRegionCapture(true))}
+                    onKeyDown={(e) => isPseudoClick(e) && dispatch(setRegionCapture(true))}
+                />
+            </Menu>
+        ),
+        carcara: (
+            <Menu className="nav-menu">
+                <MenuItem icon="endorsed" text="Check proof" onClick={() => void dispatch(checkProofAction())} />
+                <MenuItem icon="build" text="Elaborate proof" onClick={() => void dispatch(elaborateProofAction())} />
+                <MenuItem icon="document" text="RARE rules…" onClick={() => dispatch(setRareDialogOpen(true))} />
+                <MenuItem
+                    icon="undo"
+                    text={history.length ? `Revert to previous proof (${history.length})` : 'Revert to previous proof'}
+                    disabled={!history.length}
+                    onClick={() => dispatch(revertProof())}
                 />
             </Menu>
         ),
@@ -579,16 +583,14 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
         ),
         examples: (
             <Menu className="nav-menu">
-                {Object.keys(examples).map((ex, id) => {
-                    return (
-                        <MenuItem
-                            key={id}
-                            text={`Example ${id + 1}`}
-                            onClick={(e) => runExample(e, ex, id)}
-                            onKeyDown={(e) => isPseudoClick(e) && runExample(null, ex, id)}
-                        />
-                    );
-                })}
+                {examples.map((example) => (
+                    <MenuItem
+                        key={example.id}
+                        text={example.label}
+                        onClick={(e) => runExample(e, example)}
+                        onKeyDown={(e) => isPseudoClick(e) && runExample(null, example)}
+                    />
+                ))}
             </Menu>
         ),
     };
@@ -609,27 +611,23 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
                         openDialog('upload-proof');
                     }}
                     id="upload-proof-bt"
-                    className="bp3-minimal"
+                    variant="minimal"
                     icon="upload"
                     text={windowSize.width >= criticalWidth ? 'Upload Proof' : ''}
                     tabIndex={tabIndex}
                 />
-                <Popover2
-                    content={fileName ? menus.examples : undefined}
-                    placement="bottom-end"
-                    modifiers={{ arrow: { enabled: isNotMozz } }}
-                >
+                <Popover content={fileName ? menus.examples : undefined} placement="bottom-end">
                     <Button
                         id="examples-bt"
-                        className="bp3-minimal"
+                        variant="minimal"
                         icon="manual"
                         text={windowSize.width >= criticalWidth ? 'Examples' : ''}
                         tabIndex={tabIndex}
                     />
-                </Popover2>
+                </Popover>
                 <Button
                     id="input-smt-bt"
-                    className="bp3-minimal"
+                    variant="minimal"
                     icon="code"
                     text={windowSize.width >= criticalWidth ? 'SMT Input' : ''}
                     onClick={() => setSmtDrawerIsOpen(true)}
@@ -642,14 +640,13 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
                     <>
                         <Navbar.Heading id="file-name-title">{fileName}</Navbar.Heading>
                         <Navbar.Divider />
-                        <Popover2
+                        <Popover
                             autoFocus={false}
                             enforceFocus={false}
                             content={renderMatchableCmd()}
                             isOpen={matchableCmdIsOpen}
                             disabled={matchableCmd.length === 0}
                             placement="bottom-end"
-                            modifiers={{ arrow: { enabled: isNotMozz } }}
                         >
                             <InputGroup
                                 id="command"
@@ -664,23 +661,19 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
                                 }}
                                 onKeyDown={handleInputKeyDown}
                                 rightElement={
-                                    <Popover2
-                                        content={menus.help}
-                                        placement="bottom-end"
-                                        modifiers={{ arrow: { enabled: isNotMozz } }}
-                                    >
+                                    <Popover content={menus.help} placement="bottom-end">
                                         <Button
                                             icon="help"
-                                            className="bp3-minimal"
+                                            variant="minimal"
                                             onFocusCapture={(e) => inTutorial && e.target.blur()}
                                             tabIndex={-1}
                                         />
-                                    </Popover2>
+                                    </Popover>
                                 }
                                 autoComplete="off"
                                 tabIndex={tabIndex}
                             />
-                        </Popover2>
+                        </Popover>
                         <Button
                             style={{ marginLeft: '5px' }}
                             icon="play"
@@ -696,47 +689,54 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
                             tabIndex={-1}
                         />
                         <Navbar.Divider />
-                        <Popover2
+                        <Popover
                             content={fileName ? menus.style : undefined}
                             placement="bottom-end"
                             disabled={fileName ? false : true}
-                            modifiers={{ arrow: { enabled: isNotMozz } }}
                         >
                             <Button
                                 id="style-bt"
                                 icon="presentation"
-                                className="bp3-minimal"
+                                variant="minimal"
                                 text={windowSize.width >= criticalWidth ? 'Style' : ''}
                                 disabled={fileName ? false : true}
                                 tabIndex={tabIndex}
                             />
-                        </Popover2>
+                        </Popover>
                         <Button
                             id="visualizers-bt"
-                            className="bp3-minimal"
+                            variant="minimal"
                             icon="applications"
                             text={windowSize.width >= criticalWidth ? 'Visualizers' : ''}
                             disabled={fileName ? false : true}
                             onClick={() => setDrawerIsOpen(true)}
                             tabIndex={tabIndex}
                         />
-                        <Popover2
+                        <Popover
                             content={fileName ? menus.download : undefined}
                             placement="bottom-end"
                             disabled={fileName ? false : true}
-                            modifiers={{ arrow: { enabled: isNotMozz } }}
                         >
                             <Button
                                 id="download-bt"
-                                className="bp3-minimal"
+                                variant="minimal"
                                 icon="download"
                                 text={windowSize.width >= criticalWidth ? 'Download' : ''}
                                 disabled={fileName ? false : true}
                                 tabIndex={tabIndex}
                             />
-                        </Popover2>
+                        </Popover>
+                        <Popover content={menus.carcara} placement="bottom-end">
+                            <Button
+                                id="carcara-bt"
+                                variant="minimal"
+                                icon="endorsed"
+                                text={windowSize.width >= criticalWidth ? 'Carcara' : ''}
+                                tabIndex={tabIndex}
+                            />
+                        </Popover>
                         <Button
-                            className="bp3-minimal"
+                            variant="minimal"
                             icon="learning"
                             text={windowSize.width >= criticalWidth ? 'Tutorial' : ''}
                             disabled={fileName ? false : true}
@@ -768,7 +768,8 @@ function mapStateToProps(state: ReduxState, ownProps: NavbarProps) {
     return {
         ...ownProps,
         proof: selectProof(state),
-        dot: selectDot(state),
+        source: selectSource(state),
+        smt: selectSmt(state),
         view: selectView(state),
         visualInfo: selectVisualInfo(state),
         hiddenNodes: selectHiddenNodes(state),

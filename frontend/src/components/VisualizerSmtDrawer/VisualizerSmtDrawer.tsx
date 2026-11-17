@@ -1,382 +1,432 @@
-import React, { useEffect, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import MonacoEditor from '@monaco-editor/react';
-import { Drawer, Position, Classes, Button, FormGroup, Switch, InputGroup } from '@blueprintjs/core';
-import { Popover2 } from '@blueprintjs/popover2';
+import {
+    Button,
+    Callout,
+    Classes,
+    ControlGroup,
+    FormGroup,
+    HTMLSelect,
+    Icon,
+    InputGroup,
+    NumericInput,
+    Tag,
+    Tooltip,
+} from '@blueprintjs/core';
 
+import { clampPanelPosition, panelWidthFor, parsePanelLayout, type PanelBounds, type PanelLayout } from './panelLayout';
 import { selectTheme } from '../../store/features/theme/themeSlice';
 import { SmtDrawerProps } from '../../interfaces/interfaces';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-
-import { process, selectSmt, setSmt } from '../../store/features/proof/proofSlice';
-import Module from '../../wasm/cvc5';
-import { set } from '../../store/features/file/fileSlice';
-import { allowRenderNewFile, reRender, setSpinner } from '../../store/features/externalCmd/externalCmd';
+import { selectSmt, setSmt } from '../../store/features/proof/proofSlice';
+import { selectSpinner } from '../../store/features/externalCmd/externalCmd';
+import { selectLastRun } from '../../store/features/solver/solverSlice';
+import { cancelBusy, runSolverAction } from '../../store/features/solver/actions';
+import { PANEL_KEY, PANEL_LAYOUT_KEY, readPref, writePref } from '../../store/features/solver/prefs';
+import {
+    CVC5_DEFAULT_ARGS,
+    VERIT_DEFAULT_ARGS,
+    getBridgeHealth,
+    getBridgeUrl,
+    isCvc5WasmAvailable,
+    isVeritWasmAvailable,
+    setBridgeUrl,
+} from '../../solvers';
+import type { Backend, BridgeHealth, SolverId } from '../../solvers';
 
 import '../../scss/VisualizerSmtDrawer.scss';
+
+type OptionId = 'cvc5-wasm' | 'verit-wasm' | 'cvc5-bridge' | 'verit-bridge';
+
+const OPTIONS: Record<OptionId, { label: string; solver: SolverId; backend: Backend }> = {
+    'cvc5-wasm': { label: 'cvc5 (in browser, wasm)', solver: 'cvc5', backend: 'wasm' },
+    'verit-wasm': { label: 'veriT (in browser, wasm)', solver: 'verit', backend: 'wasm' },
+    'cvc5-bridge': { label: 'cvc5 (local bridge)', solver: 'cvc5', backend: 'bridge' },
+    'verit-bridge': { label: 'veriT (local bridge)', solver: 'verit', backend: 'bridge' },
+};
+
+interface PanelPrefs {
+    option: OptionId;
+    extraArgs: Record<SolverId, string>;
+    timeoutSec: number;
+}
+
+const DEFAULT_PREFS: PanelPrefs = {
+    option: 'cvc5-wasm',
+    extraArgs: { cvc5: '', verit: '' },
+    timeoutSec: 60,
+};
+
+const loadPrefs = (): PanelPrefs => {
+    const saved = readPref<Partial<PanelPrefs>>(PANEL_KEY, {});
+    return {
+        option: saved.option && saved.option in OPTIONS ? saved.option : DEFAULT_PREFS.option,
+        extraArgs: { ...DEFAULT_PREFS.extraArgs, ...saved.extraArgs },
+        timeoutSec: saved.timeoutSec && saved.timeoutSec > 0 ? saved.timeoutSec : DEFAULT_PREFS.timeoutSec,
+    };
+};
+
+const FALLBACK_NAVBAR_HEIGHT = 50;
+const FALLBACK_HEADER_HEIGHT = 40;
+
+const navbarBottom = (): number =>
+    document.querySelector('.' + Classes.NAVBAR)?.getBoundingClientRect().bottom || FALLBACK_NAVBAR_HEIGHT;
 
 const VisualizerSmtDrawer: React.FC<SmtDrawerProps> = ({
     isOpen,
     setDrawerIsOpen,
-    addErrorToast,
-    smtOptions,
-    setSmtOptions,
+    expandRequested,
+    onExpandHandled,
 }: SmtDrawerProps) => {
-    const darkTheme = useAppSelector(selectTheme);
-    const proofSmt = useAppSelector(selectSmt);
-
-    const stdoutRef = useRef('');
-    const stderrRef = useRef('');
-    const changeOutRef = useRef(false);
-
-    const [updateCounter, forceUpdate] = useReducer((x) => x + 1, 0);
-    const [errorCounter, forceError] = useReducer((x) => x + 1, 0);
-    const [optionsIsOpen, setOptionsIsOpen] = useReducer((open) => !open, false);
-    const textRef = useRef(proofSmt + '\n');
-    const [argsType, setArgsType] = useState(smtOptions.argsType);
-    const [[shouldClusterize, printAsDag], setDefaultOptions] = useState([true, true]);
-    const [customArgs, setCustomArgs] = useState(smtOptions.customArgs);
-    const [err, setErr] = useState('');
-
-    // The default arguments used in the proof generation
-    const defaultArgs = ['--dump-proofs', '--proof-format=dot', '--proof-granularity=theory-rewrite', '--dag-thresh=0'];
-
     const dispatch = useAppDispatch();
+    const darkTheme = useAppSelector(selectTheme);
+    const smt = useAppSelector(selectSmt);
+    const busy = useAppSelector(selectSpinner) === 'busy';
+    const lastRun = useAppSelector(selectLastRun);
+
+    const [prefs, setPrefs] = useState(loadPrefs);
+    const [health, setHealth] = useState<BridgeHealth | null | undefined>(undefined);
+    const [wasmOk, setWasmOk] = useState(true);
+    const [veritWasmOk, setVeritWasmOk] = useState(true);
+    const [bridgeUrl, setBridgeUrlInput] = useState(getBridgeUrl);
+
+    const updatePrefs = (patch: Partial<PanelPrefs>) => {
+        const next = { ...prefs, ...patch };
+        setPrefs(next);
+        writePref(PANEL_KEY, next);
+    };
+
+    const loadHealth = useCallback(() => {
+        getBridgeHealth().then(setHealth, () => setHealth(null));
+    }, []);
+    const refreshHealth = () => {
+        setHealth(undefined);
+        loadHealth();
+    };
 
     useEffect(() => {
-        // When smt drawer is initialized it focus the escape button
-        const bt = document
-            .getElementsByClassName('smt-drawer')[0]
-            .getElementsByClassName('bp3-button')[0] as HTMLElement;
-        bt.tabIndex = 1;
-        bt.focus();
+        isCvc5WasmAvailable().then(setWasmOk, () => setWasmOk(false));
+        isVeritWasmAvailable().then(setVeritWasmOk, () => setVeritWasmOk(false));
+        loadHealth();
+    }, [loadHealth]);
 
-        // Remove the overlay when oppening the smt drawer
-        const parent = document.getElementsByClassName('smt-drawer')[0].parentElement;
-        if (parent) parent.className = '';
+    // Floating panel: position, minimized state and drag
+    const panelRef = useRef<HTMLDivElement>(null);
+    const headerRef = useRef<HTMLDivElement>(null);
+    const drag = useRef<{ dx: number; dy: number } | null>(null);
+    const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight });
+    const bounds = (): PanelBounds => ({
+        panelWidth: panelWidthFor(window.innerWidth),
+        headerHeight: headerRef.current?.offsetHeight || FALLBACK_HEADER_HEIGHT,
+        minTop: navbarBottom(),
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+    });
+    const [layout, setLayout] = useState<PanelLayout>(() => {
+        const saved = parsePanelLayout(readPref<unknown>(PANEL_LAYOUT_KEY, null));
+        const b = bounds();
+        const base = saved ?? { x: 0, y: b.minTop, minimized: false };
+        return { ...clampPanelPosition(base, b), minimized: base.minimized };
+    });
+    const layoutRef = useRef(layout);
+    useEffect(() => {
+        layoutRef.current = layout;
+    });
+
+    const saveLayout = (next: PanelLayout) => writePref(PANEL_LAYOUT_KEY, next);
+    const toggleMinimized = () => {
+        const next = { ...layout, minimized: !layout.minimized };
+        setLayout(next);
+        saveLayout(next);
+    };
+
+    useEffect(() => {
+        const onResize = () => {
+            setViewport({ w: window.innerWidth, h: window.innerHeight });
+            setLayout((l) => ({ ...l, ...clampPanelPosition(l, bounds()) }));
+        };
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
     }, []);
 
-    useEffect(() => {
-        textRef.current = proofSmt;
-        forceUpdate();
-    }, [proofSmt]);
-
-    useEffect(() => {
-        // If it's custom args
-        if (!argsType && updateCounter) {
-            // Copy the default args to the custom args, because the probability
-            // that the user will use one of these flags is high
-            let newArgs = defaultArgs.reduce((acc, arg) => (acc += arg + ' '), '');
-            if (shouldClusterize) newArgs += ' --print-dot-clusters';
-            if (printAsDag) newArgs += ' --proof-dot-dag';
-            setCustomArgs(newArgs);
+    // Carcara needs the SMT problem: show the panel even if minimized
+    useLayoutEffect(() => {
+        if (!expandRequested) return;
+        if (layoutRef.current.minimized) {
+            const next = { ...layoutRef.current, minimized: false };
+            setLayout(next);
+            saveLayout(next);
         }
-    }, [argsType]);
+        onExpandHandled?.();
+    }, [expandRequested, onExpandHandled]);
 
     useEffect(() => {
-        // When component unmount, make sure that the custom args are saved
-        return () => {
-            setSmtOptions({ argsType, customArgs });
+        panelRef.current?.focus();
+    }, []);
+
+    const onHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+        if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+        drag.current = { dx: e.clientX - layout.x, dy: e.clientY - layout.y };
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        e.preventDefault();
+    };
+    const dragPosition = (e: React.PointerEvent<HTMLDivElement>, { dx, dy }: { dx: number; dy: number }) =>
+        clampPanelPosition({ x: e.clientX - dx, y: e.clientY - dy }, bounds());
+    const onHeaderPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+        if (!drag.current) return;
+        const pos = dragPosition(e, drag.current);
+        setLayout((l) => ({ ...l, ...pos }));
+    };
+    const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+        if (!drag.current) return;
+        // Taken from the event: the last move may not have rendered yet
+        const next = { ...layoutRef.current, ...dragPosition(e, drag.current) };
+        drag.current = null;
+        e.currentTarget.releasePointerCapture?.(e.pointerId);
+        setLayout(next);
+        saveLayout(next);
+    };
+
+    const onPanelKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+        if (e.key !== 'Escape' || e.defaultPrevented) return;
+        // Monaco closes its suggestion widget with Escape; leave it be
+        if (panelRef.current?.querySelector('.suggest-widget.visible')) return;
+        e.preventDefault();
+        setDrawerIsOpen(false);
+    };
+
+    const { solver, backend } = OPTIONS[prefs.option];
+    const defaults = solver === 'cvc5' ? CVC5_DEFAULT_ARGS : VERIT_DEFAULT_ARGS;
+
+    // Why an option cannot be used, or null
+    const disabledReason = useMemo(() => {
+        const reasons: Record<OptionId, string | null> = {
+            'cvc5-wasm': wasmOk ? null : 'The cvc5 WebAssembly build is not available in this deployment.',
+            'verit-wasm': veritWasmOk
+                ? null
+                : 'The veriT WebAssembly build is not available in this deployment (run `make verit-wasm`).',
+            'cvc5-bridge': null,
+            'verit-bridge': null,
         };
-    }, [argsType, customArgs]);
+        const bridgeReason = (tool: 'cvc5' | 'verit'): string | null => {
+            if (health === undefined) return 'Checking the local bridge…';
+            if (health === null) return `The local bridge is unreachable at ${getBridgeUrl()}.`;
+            return health.tools[tool] ? null : `The bridge has no ${tool === 'cvc5' ? 'cvc5' : 'veriT'} configured.`;
+        };
+        reasons['cvc5-bridge'] = bridgeReason('cvc5');
+        reasons['verit-bridge'] = bridgeReason('verit');
+        return reasons;
+    }, [wasmOk, veritWasmOk, health]);
 
-    useEffect(() => {
-        if (errorCounter) addErrorToast(err);
-    }, [errorCounter]);
+    const currentDisabled = disabledReason[prefs.option];
 
-    const options = {
-        theme: darkTheme ? 'vs-dark' : 'vs',
-        tabIndex: 5,
+    const run = () => {
+        const extraArgs = prefs.extraArgs[solver].split(/\s+/).filter(Boolean);
+        void dispatch(
+            runSolverAction({ solver, backend, problem: smt, extraArgs, timeoutMs: prefs.timeoutSec * 1000 }),
+        );
     };
 
-    const divColor = darkTheme ? 'rgb(255, 255, 255, 0.15)' : 'rgb(0, 0, 0, 0.15)';
-
-    const helpDiv = (
-        <div
-            className={`bp3-menu ${darkTheme ? 'bp3-dark' : ''}`}
-            style={{
-                maxWidth: '200px',
-                padding: '5px 8px !important',
-                boxShadow: '0px 0px 15px rgba(0, 0, 0, 0.651)',
-                textAlign: 'justify',
-            }}
-        >
-            Look at{' '}
-            <a href="https://cvc5.github.io/docs/cvc5-1.0.0/options.html" target="_blank" rel="noreferrer">
-                CVC5 documentation
-            </a>{' '}
-            to understand more about the argument parser.
-        </div>
-    );
-
-    const defaultArgsDiv = (
-        <div id="helperDiv" className={`bp3-menu ${darkTheme ? 'bp3-dark' : ''}`}>
-            Default arguments are:{' '}
-            {defaultArgs.reduce((acc: any, str: string) => {
-                return (acc += str + ' ');
-            }, '')}
-        </div>
-    );
-
-    const shouldClusterizeDiv = (
-        <div id="helperDiv" className={`bp3-menu ${darkTheme ? 'bp3-dark' : ''}`}>
-            Whether the proof node clusters (e.g. SAT, CNF, INPUT) will be printed when using the dot format or not.
-        </div>
-    );
-
-    const printAsDagDiv = (
-        <div id="helperDiv" className={`bp3-menu ${darkTheme ? 'bp3-dark' : ''}`}>
-            Indicates if the dot proof will be printed as a DAG or as a tree.
-        </div>
-    );
-
-    // Remove the cvc5> prompt message from the stdout
-    const sanitizeDotResult = (result: string): string => result.replaceAll(/(cvc5> )+/g, '');
-    const updateStdout = (str: string) => (stdoutRef.current += str + '\n');
-    const updateStderr = (str: string) => (stderrRef.current += str + '\n');
-    // Function called post the cvc5 execution
-    const postCVC5run = (isThereError: boolean) => {
-        // Sanitize the string
-        stdoutRef.current = sanitizeDotResult(stdoutRef.current).trim();
-        // If there was an error
-        if (isThereError && !stdoutRef.current.length) {
-            // Change the spin message to render
-            dispatch(setSpinner('off'));
-
-            setErr(
-                stderrRef.current.length
-                    ? stderrRef.current
-                    : 'Error: Unknown error, check out the arguments parsed or the smt text.',
-            );
-            forceError();
-        }
-        // Get the result .dot
-        else {
-            dispatch(set({ name: 'own-proof.dot', value: stdoutRef.current }));
-
-            dispatch(allowRenderNewFile());
-            dispatch(reRender());
-
-            dispatch(process(stdoutRef.current));
-
-            // Change the spin message to render
-            dispatch(setSpinner('render'));
-        }
-    };
-    // Clean the output a single time during the cvc5 execution
-    const cleanStdout = () => {
-        if (!changeOutRef.current) {
-            stdoutRef.current = '';
-            changeOutRef.current = true;
-        }
+    const applyBridgeUrl = () => {
+        setBridgeUrl(bridgeUrl);
+        setBridgeUrlInput(getBridgeUrl());
+        refreshHealth();
     };
 
+    const tools = health?.tools;
+    const toolTag = (name: string, info: { version: string } | null | undefined) => (
+        <Tag key={name} minimal intent={info ? 'success' : 'none'} style={{ marginRight: 4 }}>
+            {info ? versionLabel(name, info.version) : `${name} missing`}
+        </Tag>
+    );
+
+    if (!isOpen) return null;
+
+    const minimized = layout.minimized;
     return (
-        <Drawer
-            className={`smt-drawer ${darkTheme ? 'bp3-dark' : ''}`}
-            style={{ maxHeight: '65%', width: '35%' }}
-            autoFocus={true}
-            canEscapeKeyClose={true}
-            canOutsideClickClose={false}
-            enforceFocus={false}
-            hasBackdrop={false}
-            isOpen={isOpen}
-            position={Position.LEFT}
-            usePortal={false}
-            onClose={(e) => {
-                e.preventDefault();
-                setDrawerIsOpen(false);
-                // Save the smt
-                dispatch(setSmt(textRef.current));
+        <div
+            ref={panelRef}
+            role="dialog"
+            aria-label="SMT Input and Solvers"
+            tabIndex={-1}
+            className={`smt-drawer ${Classes.CARD} ${Classes.ELEVATION_3} ${darkTheme ? Classes.DARK : ''}`}
+            style={{
+                left: layout.x,
+                top: layout.y,
+                width: panelWidthFor(viewport.w),
+                maxHeight: Math.max(0, viewport.h - layout.y),
             }}
-            icon="code"
-            title="SMT Input"
+            onKeyDown={onPanelKeyDown}
         >
-            <div className={Classes.DRAWER_BODY} style={{ overflow: 'hidden' }}>
-                <MonacoEditor
-                    height={'300px'}
-                    language="graphql"
-                    value={textRef.current}
-                    onChange={(value) => value !== undefined && (textRef.current = value)}
-                    onMount={() => forceUpdate()}
-                    options={options}
+            <div
+                ref={headerRef}
+                className="smt-header"
+                onPointerDown={onHeaderPointerDown}
+                onPointerMove={onHeaderPointerMove}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+            >
+                <Icon icon="code" />
+                <span className="smt-title">SMT Input and Solvers</span>
+                <Button
+                    minimal
+                    small
+                    icon={minimized ? 'maximize' : 'minus'}
+                    aria-label={minimized ? 'Restore SMT panel' : 'Minimize SMT panel'}
+                    onClick={toggleMinimized}
                 />
-                <div className={optionsIsOpen ? 'options-sec' : 'options-sec-open'}>
-                    <Switch
-                        label="Default args or custom args"
-                        style={{ margin: '10px 20px' }}
-                        checked={argsType}
-                        onChange={() => setArgsType(!argsType)}
-                        tabIndex={4}
-                    />
-                    <FormGroup
-                        label={
-                            <div>
-                                Default args:{' '}
-                                <Popover2
-                                    disabled={!argsType}
-                                    content={defaultArgsDiv}
-                                    placement="auto"
-                                    modifiers={{ arrow: { enabled: true } }}
-                                    hoverCloseDelay={200}
-                                    hoverOpenDelay={200}
-                                >
-                                    <Button disabled={!argsType} icon="help" className="bp3-minimal" tabIndex={4} />
-                                </Popover2>
-                            </div>
-                        }
-                        className="args-forms"
-                        style={{ borderBottom: `1px solid ${divColor}`, borderTop: `1px solid ${divColor}` }}
-                        disabled={!argsType}
-                    >
-                        <div className="default-option-div">
-                            <Switch
-                                label="Should clusterize proof"
-                                disabled={!argsType}
-                                checked={shouldClusterize}
-                                onChange={() => setDefaultOptions([!shouldClusterize, printAsDag])}
-                                tabIndex={4}
-                            />
-                            <Popover2
-                                disabled={!argsType}
-                                content={shouldClusterizeDiv}
-                                placement="auto"
-                                modifiers={{ arrow: { enabled: true } }}
-                                hoverCloseDelay={200}
-                                hoverOpenDelay={200}
-                            >
-                                <Button disabled={!argsType} icon="help" className="bp3-minimal" tabIndex={4} />
-                            </Popover2>
-                        </div>
-                        <div className="default-option-div">
-                            <Switch
-                                label="Should print as tree or as DAG"
-                                disabled={!argsType}
-                                checked={printAsDag}
-                                onChange={() => setDefaultOptions([shouldClusterize, !printAsDag])}
-                                tabIndex={4}
-                            />
-                            <Popover2
-                                disabled={!argsType}
-                                content={printAsDagDiv}
-                                placement="auto"
-                                modifiers={{ arrow: { enabled: true } }}
-                                hoverCloseDelay={200}
-                                hoverOpenDelay={200}
-                            >
-                                <Button disabled={!argsType} icon="help" className="bp3-minimal" tabIndex={4} />
-                            </Popover2>
-                        </div>
-                    </FormGroup>
-                    <FormGroup label="Custom args" className="args-forms" disabled={argsType}>
-                        <InputGroup
-                            id="text-input"
-                            placeholder="Placeholder text"
-                            disabled={argsType}
-                            rightElement={
-                                <Popover2
-                                    disabled={argsType}
-                                    content={helpDiv}
-                                    placement="auto"
-                                    modifiers={{ arrow: { enabled: true } }}
-                                    hoverCloseDelay={200}
-                                    hoverOpenDelay={200}
-                                >
-                                    <Button disabled={argsType} icon="help" className="bp3-minimal" tabIndex={4} />
-                                </Popover2>
-                            }
-                            value={customArgs}
-                            onChange={(e) => setCustomArgs(e.target.value)}
-                            tabIndex={4}
-                        />
-                    </FormGroup>
-                </div>
-                <footer
-                    style={{
-                        position: 'relative',
-                        borderTop: optionsIsOpen ? `solid 1px ${divColor}` : '',
+                <Button
+                    minimal
+                    small
+                    icon="cross"
+                    aria-label="Close SMT panel"
+                    onClick={() => setDrawerIsOpen(false)}
+                />
+            </div>
+            <div className="solver-panel" hidden={minimized}>
+                <MonacoEditor
+                    height="260px"
+                    language="lisp"
+                    value={smt}
+                    onChange={(value) => dispatch(setSmt(value ?? ''))}
+                    options={{
+                        theme: darkTheme ? 'vs-dark' : 'vs',
+                        minimap: { enabled: false },
+                        automaticLayout: true,
                     }}
-                >
-                    <Button
-                        style={{ float: 'left' }}
-                        className="bp3-minimal margin-5"
-                        icon="more"
-                        text="Options"
-                        onClick={() => setOptionsIsOpen()}
-                        tabIndex={1}
-                    />
-                    <div style={{ float: 'right', display: 'flex' }}>
-                        <Button
-                            className="bp3-minimal margin-5"
-                            icon="code"
-                            text="Generate proof"
-                            onClick={() => {
-                                dispatch(setSmt(textRef.current));
+                />
+                <div className="solver-form">
+                    <FormGroup label="Solver">
+                        <HTMLSelect
+                            fill
+                            value={prefs.option}
+                            onChange={(e) => updatePrefs({ option: e.currentTarget.value as OptionId })}
+                        >
+                            {(Object.keys(OPTIONS) as OptionId[]).map((id) => (
+                                <option key={id} value={id} disabled={disabledReason[id] !== null}>
+                                    {OPTIONS[id].label}
+                                    {disabledReason[id] ? ' (unavailable)' : ''}
+                                </option>
+                            ))}
+                        </HTMLSelect>
+                        {(Object.keys(OPTIONS) as OptionId[])
+                            .filter((id) => disabledReason[id] !== null)
+                            .map((id) => (
+                                <Tooltip key={id} content={disabledReason[id] ?? ''} placement="bottom-start">
+                                    <Tag minimal style={{ margin: '4px 4px 0 0' }}>
+                                        {OPTIONS[id].label}: unavailable
+                                    </Tag>
+                                </Tooltip>
+                            ))}
+                    </FormGroup>
 
-                                let args = defaultArgs;
-                                // If is default args
-                                if (argsType) {
-                                    // Add the arguments selected by the user
-                                    if (shouldClusterize) args.push('--print-dot-clusters');
-                                    if (printAsDag) args.push('--proof-dot-dag');
-                                }
-                                // Custom args
-                                else {
-                                    // Split the arguments into an array
-                                    args = customArgs.split('--');
-                                    args = args
-                                        .map((arg) => arg.trim())
-                                        .filter((arg) => {
-                                            return arg.length !== 0;
-                                        })
-                                        .map((arg) => '--' + arg);
-
-                                    let i = 0;
-                                    // Make sure that the output format is .dot
-                                    const isThereFormat = args.some((arg, id) => {
-                                        i = id;
-                                        return arg.indexOf('--proof-format') !== -1;
-                                    });
-                                    // If there isn't a proof format
-                                    if (!isThereFormat) args.push('--proof-format=dot');
-                                    // Verify is the format is the correct one
-                                    else if (!args[i].match(/--proof-format\s*=\s*dot/)) {
-                                        args[i] = '--proof-format=dot';
-                                    }
-                                }
-
-                                // Reset the stdout and stderr before executing cvc5
-                                stdoutRef.current = '';
-                                stderrRef.current = '';
-                                changeOutRef.current = false;
-
-                                // Only calls web assembly when there is some text on the code editor
-                                if (textRef.current.trim().length) {
-                                    dispatch(setSpinner('cvc5'));
-
-                                    // Run cvc5
-                                    Module({
-                                        arguments: args,
-                                        proofTxt: textRef.current,
-                                        out: updateStdout,
-                                        err: updateStderr,
-                                        postCVC5: postCVC5run,
-                                        cleanStdout: cleanStdout,
-                                        binaryFileName: 'cvc5.wasm',
-                                    });
-                                }
-                                // There isn't text in the code editor
-                                else {
-                                    addErrorToast('Error: Empty proof in the code editor.');
-                                }
-                            }}
-                            tabIndex={3}
+                    <FormGroup label="Default arguments" helperText="Always applied by the visualizer or the bridge.">
+                        <pre className="solver-defaults">{defaults.join(' ')}</pre>
+                    </FormGroup>
+                    <FormGroup label="Extra arguments">
+                        <InputGroup
+                            placeholder="e.g. --tlimit=5000"
+                            value={prefs.extraArgs[solver]}
+                            onChange={(e) =>
+                                updatePrefs({ extraArgs: { ...prefs.extraArgs, [solver]: e.target.value } })
+                            }
                         />
-                    </div>
+                    </FormGroup>
+                    <FormGroup label="Timeout (seconds)">
+                        <NumericInput
+                            min={1}
+                            value={prefs.timeoutSec}
+                            onValueChange={(n) => Number.isFinite(n) && n > 0 && updatePrefs({ timeoutSec: n })}
+                            fill
+                        />
+                    </FormGroup>
+
+                    <FormGroup
+                        label="Local bridge"
+                        helperText="Runs native cvc5, veriT and Carcara. See bridge/README.md."
+                    >
+                        <ControlGroup fill>
+                            <InputGroup
+                                placeholder="same origin (dev proxy)"
+                                value={bridgeUrl}
+                                onChange={(e) => setBridgeUrlInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && applyBridgeUrl()}
+                            />
+                            <Button
+                                icon="refresh"
+                                text="Refresh"
+                                onClick={applyBridgeUrl}
+                                loading={health === undefined}
+                            />
+                        </ControlGroup>
+                        <div style={{ marginTop: 6 }}>
+                            {health === undefined ? (
+                                <Tag minimal>checking…</Tag>
+                            ) : health === null ? (
+                                <Tag minimal intent="danger">
+                                    unreachable
+                                </Tag>
+                            ) : (
+                                <>
+                                    <Tag minimal intent="primary" style={{ marginRight: 4 }}>
+                                        bridge {health.version}
+                                    </Tag>
+                                    {toolTag('cvc5', tools?.cvc5)}
+                                    {toolTag('veriT', tools?.verit)}
+                                    {toolTag('carcara', tools?.carcara)}
+                                </>
+                            )}
+                        </div>
+                    </FormGroup>
+
+                    {lastRun ? (
+                        <Callout
+                            intent={
+                                lastRun.status === 'unsat'
+                                    ? 'success'
+                                    : lastRun.status === 'error'
+                                      ? 'danger'
+                                      : 'warning'
+                            }
+                            title={`${lastRun.label}: ${lastRun.status} (${(lastRun.durationMs / 1000).toFixed(2)} s)`}
+                        >
+                            {lastRun.stderr.trim() || lastRun.status !== 'unsat' ? (
+                                <pre className="solver-output">
+                                    {[tail(lastRun.stderr), lastRun.status === 'unsat' ? '' : tail(lastRun.stdout)]
+                                        .filter(Boolean)
+                                        .join('\n---\n') || '(no output)'}
+                                </pre>
+                            ) : null}
+                        </Callout>
+                    ) : null}
+                </div>
+                <footer className="solver-footer">
+                    <Button text="Cancel" icon="stop" disabled={!busy} onClick={cancelBusy} />
+                    <Tooltip content={currentDisabled ?? ''} disabled={!currentDisabled}>
+                        <Button
+                            intent="primary"
+                            icon="play"
+                            text="Run"
+                            disabled={Boolean(currentDisabled) || busy || !smt.trim()}
+                            onClick={run}
+                        />
+                    </Tooltip>
                 </footer>
             </div>
-        </Drawer>
+        </div>
     );
+};
+
+// "cvc5 1.4.2 [git ...]" -> "cvc5 1.4.2"; adds the name when the version lacks it
+const versionLabel = (name: string, version: string): string => {
+    const short = version.split(' [')[0];
+    return short.toLowerCase().includes(name.toLowerCase()) ? short : `${name} ${short}`;
+};
+
+const tail = (text: string, max = 1200): string => {
+    const t = text.trim();
+    return t.length > max ? '...' + t.slice(-max) : t;
 };
 
 export default VisualizerSmtDrawer;

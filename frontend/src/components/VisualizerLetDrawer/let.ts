@@ -1,6 +1,16 @@
+import { letNamesIn } from '../../alethe';
+import type { LetMap } from '../../alethe';
+
 interface Line {
     value: string;
     indentLevel: number;
+}
+
+// Let names (whole symbols) found in `text`, keyed by their index
+export function findLets(text: string, letMap: LetMap): { [index: number]: string } {
+    const indices: { [index: number]: string } = {};
+    letNamesIn(text, letMap).forEach(({ name, index }) => (indices[index] = name));
+    return indices;
 }
 
 class Let {
@@ -9,7 +19,10 @@ class Let {
     lines: Line[];
     biggerID: number;
     isExpanded: boolean;
-    externalLets: { [key: string]: { let: Let; idx: number[] } };
+    // Names are resolved lazily through `letsList`: a let may reference lets created after it
+    externalLets: { [key: string]: { name: string; idx: number[] } };
+    private letsList: { [key: string]: Let };
+    private fullValue?: string;
 
     constructor(name: string, letText: string, letsList: { [key: string]: Let }, indices: { [key: number]: string }) {
         this.name = name;
@@ -17,13 +30,14 @@ class Let {
         this.lines = [{ value: letText, indentLevel: 0 }];
         this.biggerID = 0;
         this.isExpanded = false;
+        this.letsList = letsList;
 
         this.externalLets = {};
         Object.keys(indices).forEach((key) => {
             const numKey = Number(key);
             const letName = indices[numKey];
             this.externalLets[letName] = {
-                let: letsList[letName],
+                name: letName,
                 idx: this.externalLets[letName] ? [...this.externalLets[letName].idx, numKey] : [numKey],
             };
         });
@@ -40,25 +54,26 @@ class Let {
         return size;
     };
 
-    expandValue = (shouldUpdate = false): string => {
-        const keyList = Object.keys(this.externalLets).map((key) => this.externalLets[key].let.name);
-        let letText = this.value;
-
-        // Iterate from the last to the first external let
-        for (let i = keyList.length - 1; i >= 0; i--) {
-            const letName = keyList[i];
-
-            // For each let, iterate through all the indexes they show up inside the string
-            for (let k = this.externalLets[letName].idx.length - 1; k >= 0; k--) {
-                const idx = this.externalLets[letName].idx[k];
-
-                // Expand all the terms
-                letText =
-                    letText.substring(0, idx) +
-                    this.externalLets[letName].let.expandValue() +
-                    letText.substring(idx + letName.length, letText.length);
+    // Fully expanded text; `value` never changes, so it is cached
+    private fullyExpanded = (): string => {
+        if (this.fullValue === undefined) {
+            let letText = this.value;
+            // Replace from the last occurrence so the indices stay valid
+            const occurrences = Object.values(this.externalLets)
+                .flatMap(({ name, idx }) => idx.map((i) => ({ name, i })))
+                .sort((x, y) => y.i - x.i);
+            for (const { name, i } of occurrences) {
+                const external = this.letsList[name];
+                if (!external) continue;
+                letText = letText.substring(0, i) + external.fullyExpanded() + letText.substring(i + name.length);
             }
+            this.fullValue = letText;
         }
+        return this.fullValue;
+    };
+
+    expandValue = (shouldUpdate = false): string => {
+        const letText = this.fullyExpanded();
         if (shouldUpdate) {
             this.lines = [{ value: letText, indentLevel: 0 }];
             this.biggerID = 0;

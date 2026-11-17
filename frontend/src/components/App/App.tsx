@@ -1,6 +1,15 @@
-import React, { useEffect, useReducer, useState } from 'react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
 
-import { Intent, Overlay, Position, Spinner, Toaster } from '@blueprintjs/core';
+import {
+    Classes,
+    Intent,
+    OverlayToaster,
+    Button,
+    Overlay2,
+    Position,
+    Spinner,
+    type OverlayToaster as OverlayToasterType,
+} from '@blueprintjs/core';
 
 import VisualizerNavbar from '../VisualizerNavbar/VisualizerNavbar';
 import VisualizerDialog from '../VisualizerDialog/VisualizerDialog';
@@ -11,7 +20,10 @@ import { useAppSelector } from '../../store/hooks';
 import { selectTheme } from '../../store/features/theme/themeSlice';
 import VisualizerTutorial from '../VisualizerTutorial/VisualizerTutorial';
 import VisualizerSmtDrawer from '../VisualizerSmtDrawer/VisualizerSmtDrawer';
-import { selectSpinner } from '../../store/features/externalCmd/externalCmd';
+import CarcaraDialogs from '../CarcaraDialogs/CarcaraDialogs';
+import { selectBusyLabel, selectSpinner } from '../../store/features/externalCmd/externalCmd';
+import { selectPanelRequest, selectToast } from '../../store/features/solver/solverSlice';
+import { cancelBusy } from '../../store/features/solver/actions';
 
 const App: React.FC = () => {
     const [dialogIsOpen, setDialogIsOpen] = useState(true);
@@ -25,30 +37,43 @@ const App: React.FC = () => {
         if (smtDrawerIsOpen) setSmtDrawerIsOpen(false);
         return null;
     }, null);
-    const [smtOptions, setSmtOptions] = useState({ argsType: true, customArgs: '' });
     const darkTheme = useAppSelector(selectTheme);
     const spinner = useAppSelector(selectSpinner);
+    const busyLabel = useAppSelector(selectBusyLabel);
+    const toast = useAppSelector(selectToast);
+    const panelRequest = useAppSelector(selectPanelRequest);
 
     // Toaster
-    let toaster: Toaster;
-    const refHandlers = {
-        toaster: (ref: Toaster) => (toaster = ref),
-    };
+    const toasterRef = useRef<OverlayToasterType>(null);
 
     const addErrorToast = (err: string) => {
-        toaster.show({ icon: 'warning-sign', intent: Intent.DANGER, message: err });
+        toasterRef.current?.show({ icon: 'warning-sign', intent: Intent.DANGER, message: err });
     };
 
+    // Toasts and panel requests raised by the solver/Carcara actions
     useEffect(() => {
-        document.getElementsByClassName('bp3-overlay')[0]
-            ? (document.getElementsByClassName('bp3-overlay')[0].className = '')
+        if (toast) toasterRef.current?.show({ intent: toast.intent, message: toast.message, timeout: 6000 });
+    }, [toast]);
+
+    // Only Carcara requests expand a minimized panel, not the navbar examples
+    const [expandSmtPanel, setExpandSmtPanel] = useState(false);
+    const [seenPanelRequest, setSeenPanelRequest] = useState(panelRequest);
+    if (panelRequest !== seenPanelRequest) {
+        setSeenPanelRequest(panelRequest);
+        setSmtDrawerIsOpen(true);
+        setExpandSmtPanel(true);
+    }
+
+    useEffect(() => {
+        document.getElementsByClassName(Classes.OVERLAY)[0]
+            ? (document.getElementsByClassName(Classes.OVERLAY)[0].className = '')
             : null;
     }, [drawerIsOpen]);
 
     return (
-        <div className={darkTheme ? ' bp3-dark' : ''} style={{ height: '100%' }}>
+        <div className={darkTheme ? Classes.DARK : ''} style={{ height: '100%' }}>
             <VisualizerTutorial inTutorial={inTutorial} setInTutorial={setInTutorial} />
-            <Toaster position={Position.TOP} ref={refHandlers.toaster} />
+            <OverlayToaster position={Position.TOP} ref={toasterRef} />
             <VisualizerNavbar
                 setDialogIsOpen={setDialogIsOpen}
                 setDrawerIsOpen={setDrawerOpenState}
@@ -70,19 +95,22 @@ const App: React.FC = () => {
                 <VisualizerSmtDrawer
                     isOpen={smtDrawerIsOpen}
                     setDrawerIsOpen={setSmtDrawerIsOpen}
-                    addErrorToast={addErrorToast}
-                    smtOptions={smtOptions}
-                    setSmtOptions={setSmtOptions}
+                    expandRequested={expandSmtPanel}
+                    onExpandHandled={() => setExpandSmtPanel(false)}
                 />
             ) : null}
-            <Overlay isOpen={spinner !== 'off'} className="spinner-overlay">
+            <CarcaraDialogs />
+            <Overlay2 isOpen={spinner !== 'off'} className="spinner-overlay">
                 <div className="overlay-container">
                     <div className="spinner-info">
-                        <h1>{spinner === 'cvc5' ? 'cvc5 is running!' : 'rendering graph!'}</h1>
-                        <Spinner intent={spinner === 'cvc5' ? 'primary' : 'success'} size={80} />
+                        <h1>{spinner === 'busy' ? busyLabel : 'rendering graph!'}</h1>
+                        <Spinner intent={spinner === 'busy' ? 'primary' : 'success'} size={80} />
+                        {spinner === 'busy' ? (
+                            <Button icon="stop" text="Cancel" onClick={cancelBusy} style={{ marginTop: 20 }} />
+                        ) : null}
                     </div>
                 </div>
-            </Overlay>
+            </Overlay2>
         </div>
     );
 };

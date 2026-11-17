@@ -22,7 +22,7 @@
     margin: 0 !important;
     padding: 0 !important;
 
-    .bp3-icon {
+    .bp6-icon {
         margin: 0 !important;
         cursor: pointer;
         &:hover {
@@ -30,13 +30,13 @@
         }
     }
 
-    .bp3-dialog-header {
+    .bp6-dialog-header {
         display: flex;
         justify-content: space-between;
         height: auto !important;
         min-height: 0;
 
-        .bp3-button {
+        .bp6-button {
             background-color: transparent !important;
             border: none !important;
             box-shadow: none !important;
@@ -67,7 +67,7 @@
         background-color: rgb(0, 0, 0);
     }
 
-    body {
+    .tutorial-body {
         color: inherit;
         display: grid;
         grid-template-columns: 13px 1fr 13px;
@@ -115,18 +115,18 @@
         text-align: justify;
     }
 
-    .bp3-button {
+    .bp6-button {
         padding: 3px;
         min-height: 0;
     }
 
-    .bp3-dialog-footer {
+    .bp6-dialog-footer {
         display: flex;
         justify-content: end;
         padding: 2px 0;
     }
 
-    .bp3-divider {
+    .bp6-divider {
         margin-bottom: 1px;
     }
 }
@@ -134,7 +134,7 @@
 .tutorial-portal {
     z-index: 51;
     pointer-events: none;
-    .bp3-overlay-enter-done {
+    .bp6-overlay-enter-done {
         transition: background-color 0.2s ease-out;
         background-color: rgba(87, 82, 82, 0.233);
         width: 100%;

@@ -1,5 +1,6 @@
+import type { JSX } from 'react';
 import React, { useEffect, useState } from 'react';
-import { ControlGroup, Button, InputGroup } from '@blueprintjs/core';
+import { Classes, ControlGroup, Button, InputGroup } from '@blueprintjs/core';
 import { colorConverter } from '../../../store/features/theme/auxi';
 
 const Menu = ({
@@ -7,6 +8,8 @@ const Menu = ({
     unfoldNext,
     foldSelectedNodes,
     foldAllDescendants,
+    elaborateSlice,
+    checkSlice,
     changeNodeColor,
     currentColor,
     options,
@@ -15,9 +18,11 @@ const Menu = ({
     unfoldNext: () => void;
     foldSelectedNodes: () => void;
     foldAllDescendants: () => void;
+    elaborateSlice: () => void;
+    checkSlice: () => void;
     changeNodeColor: (color: string) => void;
     currentColor: string;
-    options: { unfold: boolean; foldSelected: boolean; foldAllDescendants: boolean };
+    options: { unfold: boolean; foldSelected: boolean; foldAllDescendants: boolean; slice: boolean };
 }): JSX.Element => {
     const [color, setColor] = useState(currentColor);
 
@@ -26,20 +31,24 @@ const Menu = ({
     }, [currentColor]);
 
     return (
-        <div className="bp3-popover2-content">
-            <ul id="menu" className="bp3-menu">
+        <div className={Classes.POPOVER_CONTENT}>
+            <ul id="menu" className={Classes.MENU}>
                 {options.unfold ? (
                     <>
                         <li className="">
-                            <a className="bp3-menu-item" onClick={() => unfold()}>
-                                <div className="bp3-text-overflow-ellipsis bp3-fill bp3-icon-eye-open">
+                            <a className={Classes.MENU_ITEM} onClick={() => unfold()}>
+                                <div
+                                    className={`${Classes.TEXT_OVERFLOW_ELLIPSIS} ${Classes.FILL} ${Classes.iconClass('eye-open')}`}
+                                >
                                     <span> Unfold</span>
                                 </div>
                             </a>
                         </li>
                         <li className="">
-                            <a className="bp3-menu-item" onClick={() => unfoldNext()}>
-                                <div className="bp3-text-overflow-ellipsis bp3-fill bp3-icon-eye-open">
+                            <a className={Classes.MENU_ITEM} onClick={() => unfoldNext()}>
+                                <div
+                                    className={`${Classes.TEXT_OVERFLOW_ELLIPSIS} ${Classes.FILL} ${Classes.iconClass('eye-open')}`}
+                                >
                                     <span> Unfold Next</span>
                                 </div>
                             </a>
@@ -48,8 +57,10 @@ const Menu = ({
                 ) : null}
                 {options.foldSelected ? (
                     <li className="">
-                        <a className="bp3-menu-item" onClick={() => foldSelectedNodes()}>
-                            <div className="bp3-text-overflow-ellipsis bp3-fill bp3-icon-eye-off">
+                        <a className={Classes.MENU_ITEM} onClick={() => foldSelectedNodes()}>
+                            <div
+                                className={`${Classes.TEXT_OVERFLOW_ELLIPSIS} ${Classes.FILL} ${Classes.iconClass('eye-off')}`}
+                            >
                                 <span> Fold selected nodes</span>
                             </div>
                         </a>
@@ -57,16 +68,40 @@ const Menu = ({
                 ) : null}
                 {options.foldAllDescendants ? (
                     <li className="">
-                        <a className="bp3-menu-item" onClick={() => foldAllDescendants()}>
-                            <div className="bp3-text-overflow-ellipsis bp3-fill bp3-icon-eye-off">
+                        <a className={Classes.MENU_ITEM} onClick={() => foldAllDescendants()}>
+                            <div
+                                className={`${Classes.TEXT_OVERFLOW_ELLIPSIS} ${Classes.FILL} ${Classes.iconClass('eye-off')}`}
+                            >
                                 <span> Fold all descendants</span>
                             </div>
                         </a>
                     </li>
                 ) : null}
+                {options.slice ? (
+                    <>
+                        <li className="">
+                            <a className={Classes.MENU_ITEM} onClick={() => elaborateSlice()}>
+                                <div
+                                    className={`${Classes.TEXT_OVERFLOW_ELLIPSIS} ${Classes.FILL} ${Classes.iconClass('build')}`}
+                                >
+                                    <span> Elaborate slice from here…</span>
+                                </div>
+                            </a>
+                        </li>
+                        <li className="">
+                            <a className={Classes.MENU_ITEM} onClick={() => checkSlice()}>
+                                <div
+                                    className={`${Classes.TEXT_OVERFLOW_ELLIPSIS} ${Classes.FILL} ${Classes.iconClass('endorsed')}`}
+                                >
+                                    <span> Check slice from here…</span>
+                                </div>
+                            </a>
+                        </li>
+                    </>
+                ) : null}
                 <li className="">
-                    <a className="bp3-menu-item">
-                        <div className="bp3-text-overflow-ellipsis bp3-fill">
+                    <a className={Classes.MENU_ITEM}>
+                        <div className={`${Classes.TEXT_OVERFLOW_ELLIPSIS} ${Classes.FILL}`}>
                             <span>
                                 <span onClick={() => changeNodeColor(colorConverter('red'))}> 🟥</span>
                                 <span onClick={() => changeNodeColor(colorConverter('orange'))}> 🟧</span>
@@ -82,8 +117,8 @@ const Menu = ({
                     </a>
                 </li>
                 <li className="">
-                    <a className="bp3-menu-item">
-                        <div className="bp3-text-overflow-ellipsis bp3-fill">
+                    <a className={Classes.MENU_ITEM}>
+                        <div className={`${Classes.TEXT_OVERFLOW_ELLIPSIS} ${Classes.FILL}`}>
                             <ControlGroup
                                 onClick={(e) => {
                                     e.stopPropagation();

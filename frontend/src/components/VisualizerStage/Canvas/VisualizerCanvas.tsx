@@ -1,10 +1,14 @@
+import type { JSX } from 'react';
 import React, { Component } from 'react';
 import { Stage, Layer } from 'react-konva';
 import Konva from 'konva';
-import dagre from 'dagre';
+import dagre from '@dagrejs/dagre';
 import Node from './VisualizerNode';
 import Line from './VisualizerLine';
 import Menu from './VisualizerMenu';
+import { zoomScale } from './zoom';
+import { registerStage, unregisterStage } from './stageRegistry';
+import { setSliceDialog } from '../../../store/features/solver/solverSlice';
 import {
     NodeProps,
     LineProps,
@@ -15,6 +19,7 @@ import {
     ReduxState,
 } from '../../../interfaces/interfaces';
 
+import { premiseIds } from '../../../interfaces/nodeInfo';
 import '../../../scss/VisualizerCanvas.scss';
 
 import { CanvasProps, CanvasState } from '../../../interfaces/interfaces';
@@ -41,11 +46,13 @@ import {
     selectRenderData,
     reRender,
     addRenderCount,
+    blockRender,
     blockRenderNewFile,
     setSpinner,
     selectSpinner,
     selectSelectData,
     setSelectArea,
+    selectRegionCapture,
 } from '../../../store/features/externalCmd/externalCmd';
 
 const nodeWidth = 300,
@@ -54,7 +61,6 @@ const nodeWidth = 300,
 function handleWheel(e: Konva.KonvaEventObject<WheelEvent>): { stageScale: number; stageX: number; stageY: number } {
     e.evt.preventDefault();
 
-    const scaleBy = 1.08;
     const stage = e.target.getStage();
     if (stage) {
         const oldScale = stage.scaleX();
@@ -72,7 +78,7 @@ function handleWheel(e: Konva.KonvaEventObject<WheelEvent>): { stageScale: numbe
             y: y / oldScale - stage.y() / oldScale,
         };
 
-        const newScale = e.evt.deltaY > 0 ? oldScale * scaleBy : oldScale / scaleBy;
+        const newScale = zoomScale(oldScale, e.evt.deltaY);
 
         return {
             stageScale: newScale,
@@ -88,6 +94,8 @@ function handleWheel(e: Konva.KonvaEventObject<WheelEvent>): { stageScale: numbe
 }
 
 class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
+    stageRef = React.createRef<Konva.Stage>();
+
     constructor(props: CanvasPropsAndRedux) {
         super(props);
         this.componentDidUpdate = this.componentDidUpdate.bind(this);
@@ -136,10 +144,20 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
         return newVisualInfo;
     };
 
-    static newNodeProps = (node: NodeInterface, visualInfos: ProofState['visualInfo']): NodeProps => {
+    static newNodeProps = (
+        node: NodeInterface,
+        visualInfos: ProofState['visualInfo'],
+        proof: NodeInterface[],
+    ): NodeProps => {
         const visualInfo = visualInfos[node.id];
         return {
             id: node.id,
+            stepId: node.stepId,
+            premises: premiseIds(proof, node),
+            discharge: node.discharge,
+            anchorPath: node.anchorPath,
+            anchorArgs: node.anchorArgs,
+            clusterType: node.clusterType,
             conclusion: node.conclusion,
             rule: node.rule,
             args: node.args,
@@ -151,6 +169,7 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
             dependencies: node.dependencies ? node.dependencies : [],
             selected: visualInfo.selected,
             color: visualInfo.color,
+            highlighted: visualInfo.highlighted,
             setNodeOnFocus: () => undefined,
             toggleNodeSelection: () => undefined,
             updateNodePosition: () => undefined,
@@ -215,8 +234,10 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
         if (proofChanged || visualInfoChanged || fileChanged) {
             // Create the showing nodes array
             const showingNodes: CanvasState['showingNodes'] = {};
-            props.proof.forEach((node, id) => {
-                showingNodes[node.id] = <Node key={id} {...Canvas.newNodeProps(node, props.visualInfo)} />;
+            props.proof.forEach((node) => {
+                showingNodes[node.id] = (
+                    <Node key={node.id} {...Canvas.newNodeProps(node, props.visualInfo, props.proof)} />
+                );
             });
 
             // If has nodes and can render
@@ -247,6 +268,7 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
                         const key = parseInt(v);
                         showingNodes[key] = (
                             <Node
+                                key={showingNodes[key].key}
                                 {...{
                                     ...showingNodes[key].props,
                                     x: x - xOffset,
@@ -272,6 +294,8 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
                 stage: stage,
             };
         }
+        // Nothing to lay out: a later move must not trigger a relayout
+        else if (count < 2) props.blockRender();
         // Disable the render spinner if the rendering have finished
         else if (props.spinner === 'render' && count === 2) {
             setTimeout(() => props.setSpinner('off'), 100);
@@ -279,13 +303,18 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
         return { stage: stage };
     }
 
+    componentWillUnmount(): void {
+        unregisterStage(this.stageRef.current);
+    }
+
     componentDidMount(): void {
+        registerStage(this.stageRef.current);
         const { showingNodes } = this.state;
         const { proof, visualInfo } = this.props;
 
         const newShowingNodes: CanvasState['showingNodes'] = {};
-        proof.forEach((node, id) => {
-            newShowingNodes[node.id] = <Node key={id} {...Canvas.newNodeProps(node, visualInfo)} />;
+        proof.forEach((node) => {
+            newShowingNodes[node.id] = <Node key={node.id} {...Canvas.newNodeProps(node, visualInfo, proof)} />;
         });
 
         this.setState({ proof: proof, showingNodes: newShowingNodes });
@@ -310,9 +339,14 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
         }
     }
 
-    componentDidUpdate(prevProps: CanvasPropsAndRedux) {
-        // If the proof changed
-        if (prevProps.proof !== this.props.proof) {
+    componentDidUpdate(prevProps: CanvasPropsAndRedux, prevState: CanvasState) {
+        // Region capture blocks the node menu
+        if (this.props.regionCapture && !prevProps.regionCapture) {
+            const menuNode = document.getElementById('menu');
+            if (menuNode) menuNode.style.display = 'none';
+        }
+        // If the proof changed or the nodes were rebuilt (new nodes have no handlers nor edges)
+        if (prevProps.proof !== this.props.proof || prevState.showingNodes !== this.state.showingNodes) {
             this.updateEdgesAndFuncs();
         }
     }
@@ -343,6 +377,7 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
                 // Set the node functions
                 showingNodes[parseInt(nodeId)] = (
                     <Node
+                        key={nodeId}
                         {...{
                             ...showingNodes[parseInt(nodeId)].props,
                             setNodeOnFocus: this.setNodeOnFocus,
@@ -439,7 +474,7 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
     updateNodePosition = (key: number, x: number, y: number): void => {
         const { showingNodes, showingEdges } = this.state;
 
-        showingNodes[key] = <Node {...{ ...showingNodes[key].props, x, y }} />;
+        showingNodes[key] = <Node key={key} {...{ ...showingNodes[key].props, x, y }} />;
 
         Object.keys(showingEdges)
             .filter((edgeKey) => edgeKey.indexOf(key.toString()) !== -1)
@@ -448,6 +483,12 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
                 showingEdges[edge] = Line(this.LineProps(edge, showingNodes[from].props, showingNodes[to].props));
             });
         this.setState({ showingNodes, showingEdges });
+    };
+
+    // Opens the Carcara slice dialog for the focused node
+    openSlice = (action: 'elaborate' | 'check'): void => {
+        const found = this.state.proof.find((o) => o.id === this.state.nodeOnFocus);
+        if (found) this.props.openSliceDialog({ from: found.stepId, action });
     };
 
     handleKeyDown = (e: React.KeyboardEvent) => {
@@ -461,7 +502,7 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
     render(): JSX.Element {
         const { canvasSize, stage, showingNodes, showingEdges, nodeOnFocus, proof } = this.state;
         const color = showingNodes[nodeOnFocus] ? showingNodes[nodeOnFocus].props.color : '';
-        const { nodesSelected } = this.props;
+        const { nodesSelected, regionCapture } = this.props;
         const found = proof.find((o) => o.id === nodeOnFocus);
 
         return (
@@ -471,30 +512,40 @@ class Canvas extends Component<CanvasPropsAndRedux, CanvasState> {
                     unfoldNext={this.unfoldNext}
                     foldSelectedNodes={this.foldSelectedNodes}
                     foldAllDescendants={this.foldAllDescendants}
+                    elaborateSlice={() => this.openSlice('elaborate')}
+                    checkSlice={() => this.openSlice('check')}
                     changeNodeColor={this.changeNodeColor}
                     options={{
                         unfold: showingNodes[nodeOnFocus] ? Boolean(showingNodes[nodeOnFocus].props.nHided) : false,
                         foldSelected: nodesSelected.length > 1 && nodesSelected.includes(nodeOnFocus),
                         foldAllDescendants:
-                            Boolean(found?.children.length) && !Boolean(found?.hiddenNodes?.length) && found?.id != 0,
+                            Boolean(found?.children.length) && !found?.hiddenNodes?.length && found?.id != 0,
+                        slice:
+                            Boolean(found) &&
+                            found?.rule !== 'π' &&
+                            found?.rule !== 'assume' &&
+                            !found?.hiddenNodes?.length,
                     }}
                     currentColor={color}
                 ></Menu>
                 <Stage
-                    draggable
+                    ref={this.stageRef}
+                    draggable={!regionCapture}
                     onDragMove={() => null}
-                    onDragEnd={(e) =>
+                    onDragEnd={(e) => {
+                        // Node drags bubble up here: only the stage itself moves the view
+                        if (e.target !== e.target.getStage()) return;
                         this.setState({
                             stage: {
                                 stageScale: this.state.stage.stageScale,
                                 stageX: e.target.x(),
                                 stageY: e.target.y(),
                             },
-                        })
-                    }
+                        });
+                    }}
                     width={canvasSize.width}
                     height={canvasSize.height}
-                    onWheel={(e) => this.setState({ stage: handleWheel(e) })}
+                    onWheel={(e) => !regionCapture && this.setState({ stage: handleWheel(e) })}
                     scaleX={stage.stageScale}
                     scaleY={stage.stageScale}
                     x={stage.stageX}
@@ -524,6 +575,7 @@ function mapStateToProps(state: ReduxState, ownProps: CanvasProps) {
         renderData: selectRenderData(state),
         spinner: selectSpinner(state),
         selectData: selectSelectData(state),
+        regionCapture: selectRegionCapture(state),
         nodesSelected: selectNodesSelected(state),
         ...ownProps,
     };
@@ -541,9 +593,11 @@ const mapDispatchToProps = {
     unselectByArea,
     reRender,
     addRenderCount,
+    blockRender,
     blockRenderNewFile,
     setSpinner,
     undo,
+    openSliceDialog: setSliceDialog,
     selectNodes,
     unselectNodes,
     applyColor,

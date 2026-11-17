@@ -1,4 +1,4 @@
-.bp3-tabs {
+.bp6-tabs {
     width: 100%;
     .services-tab {
         &:focus {
@@ -6,13 +6,13 @@
         }
         margin: 0;
     }
-    .bp3-tab-list {
+    .bp6-tab-list {
         margin-top: 8px;
         margin-left: 18px;
         user-select: none;
     }
 
-    .bp3-tab {
+    .bp6-tab {
         margin-right: 20px !important;
     }
 }

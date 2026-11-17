@@ -1,8 +1,9 @@
+import type { JSX } from 'react';
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Classes } from '@blueprintjs/core';
 import { selectLetMap, selectTheoryLemmas } from '../../store/features/proof/proofSlice';
 import { useAppSelector } from '../../store/hooks';
-import Let from '../VisualizerLetDrawer/let';
+import Let, { findLets } from '../VisualizerLetDrawer/let';
 import { selectTheme } from '../../store/features/theme/themeSlice';
 import { DrawerVisualizerTabProps } from '../../interfaces/interfaces';
 
@@ -39,22 +40,15 @@ const VisualizerTheoryLemma: React.FC<DrawerVisualizerTabProps> = ({ shouldResiz
         // Init the lets
         Object.keys(letMap).forEach((key) => {
             const currentLet = letMap[key];
-
-            const indices: { [key: number]: string } = {};
             // Finds all occurences of let in the currentLet
-            [...currentLet.matchAll(/let\d+/g)].forEach((match) => {
-                if (match.index) indices[match.index] = match[0];
-            });
+            const indices = findLets(currentLet, letMap);
             letsRef.current[key] = new Let(key, currentLet, letsRef.current, indices);
         });
 
         // Init the theory lemmas
         theoryLemmas.forEach((tl, id) => {
-            const indices: { [key: number]: string } = {};
             // Finds all occurences of let in the currentTL
-            [...tl.matchAll(/let\d+/g)].forEach((match) => {
-                if (match.index) indices[match.index] = match[0];
-            });
+            const indices = findLets(tl, letMap);
 
             letsRef.current[id] = new Let(String(id), tl, letsRef.current, indices);
         });
@@ -118,10 +112,7 @@ const VisualizerTheoryLemma: React.FC<DrawerVisualizerTabProps> = ({ shouldResiz
             }
 
             // Finds all occurences of let in the currentTL
-            const indices: { [key: number]: string } = {};
-            [...currentTL.matchAll(/let\d+/g)].forEach((match) => {
-                if (match.index) indices[match.index] = match[0];
-            });
+            const indices = findLets(currentTL, letMap);
 
             const arr: (JSX.Element | string)[] = [];
             let start = 0;
@@ -134,6 +125,7 @@ const VisualizerTheoryLemma: React.FC<DrawerVisualizerTabProps> = ({ shouldResiz
                 arr.push(currentTL.substring(start, idx));
                 arr.push(
                     <a
+                        key={idx}
                         className={darkTheme ? 'let-literal-or' : 'let-literal'}
                         onClick={() => {
                             expandLet(key, thisLet, idx);
@@ -165,7 +157,7 @@ const VisualizerTheoryLemma: React.FC<DrawerVisualizerTabProps> = ({ shouldResiz
         <div className={Classes.DIALOG_BODY}>
             <table
                 id="table-node-info-2"
-                className="bp3-html-table bp3-html-table-bordered bp3-html-table-condensed bp3-html-table-striped"
+                className={`${Classes.HTML_TABLE} ${Classes.HTML_TABLE_BORDERED} ${Classes.HTML_TABLE_STRIPED}`}
                 style={{ width: '100%', minWidth: '230px' }}
             >
                 <thead>
@@ -182,16 +174,11 @@ const VisualizerTheoryLemma: React.FC<DrawerVisualizerTabProps> = ({ shouldResiz
                                 <td style={{ width: '100px', height: '100%' }}>
                                     <Button
                                         onClick={() => expandAll(id)}
-                                        className="bp3-minimal"
+                                        variant="minimal"
                                         icon="translate"
                                         text="Expand"
                                     />
-                                    <Button
-                                        onClick={() => revertLet(id)}
-                                        className="bp3-minimal"
-                                        icon="undo"
-                                        text="Revert"
-                                    />
+                                    <Button onClick={() => revertLet(id)} variant="minimal" icon="undo" text="Revert" />
                                 </td>
                             </tr>
                         );

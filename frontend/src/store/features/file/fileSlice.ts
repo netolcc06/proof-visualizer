@@ -2,9 +2,12 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { RootState } from '../../store';
 import { FileState } from '../../../interfaces/interfaces';
 
+// Small valid Alethe proof, used as the placeholder file
+export const INITIAL_PROOF = '(assume a0 a)\n(assume a1 (not a))\n(step t0 (cl) :rule resolution :premises (a0 a1))\n';
+
 const initialState: FileState = {
-    name: 'ex.smt2',
-    value: 'digraph proof {\n\trankdir="BT";\n\tnode [shape=record];\n\t0 [label="{SCOPE((not a), a)|(not (and (not a) a))}", class = " basic ", comment = "{\'subProofQty\':1}" ];\n\t1 [label="{CHAIN_RESOLUTION(true, a)|false}", class = " propositional ", comment = "{\'subProofQty\':2}" ];\n\t2 [label="{ASSUME(a)|a}", comment = "{\'subProofQty\':0}"];\n\t3 [label="{ASSUME((not a))|(not a)}", comment = "{\'subProofQty\':0}"];\n\t1->0;\n\t2->1;\n\t3->1;\n}',
+    name: 'ex.alethe',
+    value: INITIAL_PROOF,
     filesCount: 0,
 };
 
@@ -34,9 +37,6 @@ export const selectFileExtension = (state: RootState): string => {
     const ext = state.file.name.split('.').pop();
     return ext ? ext : '';
 };
-
-export const selectDot = (state: RootState): string =>
-    state.file.name.split('.').pop() === 'json' ? JSON.parse(state.file.value).dot : state.file.value;
 
 export const selectFile = (state: RootState): string => state.file.value;
 

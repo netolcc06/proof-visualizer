@@ -1,7 +1,8 @@
+import type { JSX } from 'react';
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Classes } from '@blueprintjs/core';
 
-import Let from './let';
+import Let, { findLets } from './let';
 import '../../scss/Let.scss';
 import { useAppSelector } from '../../store/hooks';
 import { selectTheme } from '../../store/features/theme/themeSlice';
@@ -40,11 +41,8 @@ const VisualizerLetDrawer: React.FC<DrawerVisualizerTabProps> = ({ shouldResize 
         // Init the let ref
         Object.keys(letMap).forEach((key) => {
             const currentLet = letMap[key];
-            const indices: { [key: number]: string } = {};
             // Finds all occurences of let in the currentLet
-            [...currentLet.matchAll(/let\d+/g)].forEach((match) => {
-                if (match.index) indices[match.index] = match[0];
-            });
+            const indices = findLets(currentLet, letMap);
 
             letsRef.current[key] = new Let(key, currentLet, letsRef.current, indices);
         });
@@ -109,10 +107,7 @@ const VisualizerLetDrawer: React.FC<DrawerVisualizerTabProps> = ({ shouldResize 
             }
 
             // Finds all occurences of let in the currentLet
-            const indices: { [key: number]: string } = {};
-            [...currentLet.matchAll(/let\d+/g)].forEach((match) => {
-                if (match.index) indices[match.index] = match[0];
-            });
+            const indices = findLets(currentLet, letMap);
 
             const arr: (JSX.Element | string)[] = [];
             let start = 0;
@@ -125,6 +120,7 @@ const VisualizerLetDrawer: React.FC<DrawerVisualizerTabProps> = ({ shouldResize 
                 arr.push(currentLet.substring(start, idx));
                 arr.push(
                     <a
+                        key={idx}
                         className={darkTheme ? 'let-literal-or' : 'let-literal'}
                         onClick={() => {
                             expandLet(key, thisLet, idx);
@@ -156,7 +152,7 @@ const VisualizerLetDrawer: React.FC<DrawerVisualizerTabProps> = ({ shouldResize 
         <div className={Classes.DIALOG_BODY}>
             <table
                 id="table-node-info-2"
-                className="bp3-html-table bp3-html-table-bordered bp3-html-table-condensed bp3-html-table-striped"
+                className={`${Classes.HTML_TABLE} ${Classes.HTML_TABLE_BORDERED} ${Classes.HTML_TABLE_STRIPED}`}
                 style={{ width: '100%' }}
             >
                 <thead>
@@ -177,13 +173,13 @@ const VisualizerLetDrawer: React.FC<DrawerVisualizerTabProps> = ({ shouldResize 
                                 <td style={{ width: '100px', height: '100%' }}>
                                     <Button
                                         onClick={() => expandAll(key)}
-                                        className="bp3-minimal"
+                                        variant="minimal"
                                         icon="translate"
                                         text="Expand"
                                     />
                                     <Button
                                         onClick={() => revertLet(key)}
-                                        className="bp3-minimal"
+                                        variant="minimal"
                                         icon="undo"
                                         text="Revert"
                                     />

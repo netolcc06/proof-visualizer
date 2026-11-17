@@ -1,7 +1,10 @@
+import type { JSX } from 'react';
 import React from 'react';
 import '../../interfaces/interfaces';
 import { NodeInterface, ProofState } from '../../interfaces/interfaces';
-import { textColorFromBg, sixDigitColor } from '../VisualizerStage/Canvas/VisualizerNode';
+import { HIGHLIGHT_COLOR } from '../../interfaces/clusterStyle';
+import { textColorFromBg, sixDigitColor, piLabel } from '../VisualizerStage/Canvas/VisualizerNode';
+import { Rect, selectExportItems, visibleGraphBounds } from '../VisualizerStage/Canvas/exportGeometry';
 
 interface Point {
     x: number;
@@ -48,7 +51,9 @@ const Arrow: React.FC<ArrowProps> = ({ origin, end }: ArrowProps) => {
 };
 
 function CreateNode(node: NodeInterface, visualInfo: ProofState['visualInfo'], limits: [number, number]): JSX.Element {
-    const { color, x, y } = visualInfo[node.id];
+    const { color, x, y, highlighted } = visualInfo[node.id];
+    const stroke = highlighted ? HIGHLIGHT_COLOR : 'black';
+    const strokeWidth = highlighted ? 3 : 1;
     const [smallestX, smallestY] = limits;
     const newX = x - smallestX;
     const newY = y - smallestY;
@@ -59,28 +64,48 @@ function CreateNode(node: NodeInterface, visualInfo: ProofState['visualInfo'], l
     const infos = {
         nHided: nHided ? `#hidden: ${nHided}` : '',
         nDescendants: ` #descendants: ${node.descendants - 1}`,
-        rule: nHided ? 'π' : node.rule,
+        rule: nHided ? piLabel(node.clusterType) : node.rule,
         dependencies: node.dependencies.length === 1 ? String(node.dependencies[0].piId) : 'π',
     };
 
     return (
         <>
-            {node.children.map((child, id) => {
-                return (
-                    <Arrow
-                        key={id}
-                        origin={{
-                            x: visualInfo[child].x - smallestX + 150,
-                            y: visualInfo[child].y - smallestY,
-                        }}
-                        end={{ x: newX + 150, y: newY + 105 }}
-                    />
-                );
-            })}
-            <rect x={newX + 0} y={newY + 0} width={300} height={35} strokeWidth="1" fill={color} stroke="black" />
-            <rect x={newX + 0} y={newY + 35} width={300} height={35} strokeWidth="1" fill={color} stroke="black" />
-            <rect x={newX + 0} y={newY + 70} width={50} height={35} strokeWidth="1" fill={color} stroke="black" />
-            <rect x={newX + 50} y={newY + 70} width={250} height={35} strokeWidth="1" fill={color} stroke="black" />
+            <rect
+                x={newX + 0}
+                y={newY + 0}
+                width={300}
+                height={35}
+                strokeWidth={strokeWidth}
+                fill={color}
+                stroke={stroke}
+            />
+            <rect
+                x={newX + 0}
+                y={newY + 35}
+                width={300}
+                height={35}
+                strokeWidth={strokeWidth}
+                fill={color}
+                stroke={stroke}
+            />
+            <rect
+                x={newX + 0}
+                y={newY + 70}
+                width={50}
+                height={35}
+                strokeWidth={strokeWidth}
+                fill={color}
+                stroke={stroke}
+            />
+            <rect
+                x={newX + 50}
+                y={newY + 70}
+                width={250}
+                height={35}
+                strokeWidth={strokeWidth}
+                fill={color}
+                stroke={stroke}
+            />
             <defs>
                 <clipPath id={'clip-conc-' + node.id}>
                     <rect x={newX} y={newY} width={300} height={35} />
@@ -96,6 +121,11 @@ function CreateNode(node: NodeInterface, visualInfo: ProofState['visualInfo'], l
                 </clipPath>
             </defs>
 
+            {node.stepId && !nHided ? (
+                <text x={newX + 2} y={newY - 4} fontSize={11} fill="#8a8a8a" fontFamily={fontFamily}>
+                    {node.stepId}
+                </text>
+            ) : null}
             <text
                 x={newX + 150}
                 y={newY + 21}
@@ -146,7 +176,14 @@ function CreateNode(node: NodeInterface, visualInfo: ProofState['visualInfo'], l
             </text>
             {node.dependencies.length ? (
                 <>
-                    <circle cx={newX + 350} cy={newY + 53} r={25} strokeWidth="1" fill={color} stroke="black" />
+                    <circle
+                        cx={newX + 350}
+                        cy={newY + 53}
+                        r={25}
+                        strokeWidth={strokeWidth}
+                        fill={color}
+                        stroke={stroke}
+                    />
                     <Arrow origin={{ x: newX + 325, y: newY + 53 }} end={{ x: newX + 300, y: newY + 53 }} />
                     <text
                         x={newX + 350}
@@ -165,32 +202,32 @@ function CreateNode(node: NodeInterface, visualInfo: ProofState['visualInfo'], l
     );
 }
 
-export function ConvertToSVG(proof: NodeInterface[], visualInfo: ProofState['visualInfo']): JSX.Element {
-    let [biggestX, biggestY, smallestX, smallestY] = [0, 0, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
-
-    // Find the biggest and smallest dimensions
-    const keys = Object.keys(visualInfo);
-    keys.forEach((key) => {
-        const { x, y } = visualInfo[Number(key)];
-        //
-        if (x > biggestX) biggestX = x;
-        if (x < smallestX) smallestX = x;
-        //
-        if (y > biggestY) biggestY = y;
-        if (y < smallestY) smallestY = y;
-    });
+// Without `region` the whole visible graph is drawn; with one, the SVG covers that graph region only
+export function ConvertToSVG(proof: NodeInterface[], visualInfo: ProofState['visualInfo'], region?: Rect): JSX.Element {
+    const bounds = region ?? visibleGraphBounds(proof, visualInfo) ?? { x: 0, y: 0, width: 1, height: 1 };
+    const limits: [number, number] = [bounds.x, bounds.y];
+    const { nodes, edges } = selectExportItems(proof, visualInfo, region);
+    const width = Math.ceil(bounds.width);
+    const height = Math.ceil(bounds.height);
 
     return (
         <svg
             id="svg-converted"
             xmlns="http://www.w3.org/2000/svg"
-            style={{ position: 'relative', top: '5px', left: '5px', overflow: 'visible' }}
-            width={biggestX - smallestX + 420}
-            height={biggestY - smallestY + 220}
+            width={width}
+            height={height}
+            viewBox={`0 0 ${width} ${height}`}
         >
-            {proof.map((node) => {
-                return CreateNode(node, visualInfo, [smallestX, smallestY]);
-            })}
+            {edges.map(({ from, to }) => (
+                <Arrow
+                    key={`${from}->${to}`}
+                    origin={{ x: visualInfo[from].x - limits[0] + 150, y: visualInfo[from].y - limits[1] }}
+                    end={{ x: visualInfo[to].x - limits[0] + 150, y: visualInfo[to].y - limits[1] + 105 }}
+                />
+            ))}
+            {nodes.map((node) => (
+                <React.Fragment key={node.id}>{CreateNode(node, visualInfo, limits)}</React.Fragment>
+            ))}
         </svg>
     );
 }

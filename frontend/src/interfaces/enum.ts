@@ -10,11 +10,5 @@ export enum renderLetKind {
     REVERT,
 }
 
-export enum ClusterKind {
-    NONE,
-    SAT,
-    CNF,
-    TL,
-    PP,
-    IN,
-}
+// Same numeric values as the inferred proof components
+export { ComponentKind as ClusterKind } from '../alethe/components';

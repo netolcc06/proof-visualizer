@@ -1,166 +1,6 @@
 import { ClusterKind } from '../../../interfaces/enum';
 import { NodeInterface, ProofState } from '../../../interfaces/interfaces';
 
-interface ClusterColorMap {
-    [type: number]: string;
-}
-
-function removeEscapedCharacters(s: string): string {
-    let newS = '';
-    for (let i = 0; i < s.length; i += 1) {
-        if (
-            !(
-                s[i] === '\\' &&
-                (s[i + 1] === '"' ||
-                    s[i + 1] === '>' ||
-                    s[i + 1] === '<' ||
-                    s[i + 1] === '{' ||
-                    s[i + 1] === '}' ||
-                    s[i + 1] === '|')
-            )
-        ) {
-            newS += s[i];
-        }
-    }
-
-    return newS;
-}
-
-export function processDot(dot: string): [NodeInterface[], ProofState['letMap'], ClusterColorMap] {
-    const nodes: NodeInterface[] = [
-        {
-            id: 0,
-            conclusion: '',
-            rule: '',
-            args: '',
-            children: [],
-            parents: [NaN],
-            descendants: 0,
-            dependencies: [],
-            clusterType: ClusterKind.NONE,
-        },
-    ];
-    let comment: string | null = dot.slice(dot.indexOf('comment='));
-    comment = comment
-        ? removeEscapedCharacters(
-              removeEscapedCharacters(comment.slice(comment.indexOf('=') + 2, comment.indexOf(';') - 1)),
-          )
-        : null;
-
-    const clustersInfos: ClusterColorMap = {};
-    const lines = dot
-        .slice(dot.indexOf('{') + 1, dot.lastIndexOf('}') - 2)
-        .replace(/(\n|\t)/gm, '')
-        .split(';');
-    lines.forEach((line) => {
-        if (line.search('subgraph') !== -1) {
-            // Get the label of this node subgraph
-            let label = '';
-            let idx = line.indexOf('label="') + 7;
-            while (line[idx] !== '"') {
-                label += line[idx];
-                idx++;
-            }
-
-            // Get the label of this node subgraph
-            let color = '';
-            idx = line.indexOf('bgcolor="') + 9;
-            while (line[idx] !== '"') {
-                color += line[idx];
-                idx++;
-            }
-
-            // Get the nodes ID's
-            const numbers = line
-                .substring(idx + 1, line.length - 1)
-                .split(/\s/)
-                .filter((str) => str.length)
-                .map((num) => Number(num));
-
-            let thisType: ClusterKind;
-            switch (label) {
-                case 'SAT':
-                    thisType = ClusterKind.SAT;
-                    break;
-                case 'CNF':
-                    thisType = ClusterKind.CNF;
-                    break;
-                case 'TL':
-                    thisType = ClusterKind.TL;
-                    break;
-                case 'PP':
-                    thisType = ClusterKind.PP;
-                    break;
-                case 'IN':
-                    thisType = ClusterKind.IN;
-                    break;
-                default:
-                    thisType = ClusterKind.NONE;
-            }
-
-            // Assign the type for each node
-            numbers.forEach((num) => {
-                nodes[num].clusterType = thisType;
-            });
-            clustersInfos[thisType] = color;
-        } else if (line.search('label') !== -1) {
-            const id = parseInt(line.slice(0, line.indexOf('[')).trim());
-            const attributes = line.slice(line.indexOf('[') + 1, line.lastIndexOf(']')).trim();
-
-            let label = attributes.slice(attributes.search(/[^\\]"/) + 3);
-            label = label.slice(0, label.search(/[^\\]"/));
-            let [conclusion, rule, args] = ['', '', ''];
-            [conclusion, rule] = label.split(/\|/);
-            [rule, args] = rule.indexOf(' :args ') != -1 ? rule.split(' :args ') : [rule, ''];
-
-            const comment: string = removeEscapedCharacters(line.slice(line.indexOf('comment'), line.lastIndexOf('"')));
-            const commentJSON = JSON.parse(comment.slice(comment.indexOf('"') + 1).replace(/'/g, '"'));
-
-            if (!nodes[id]) {
-                nodes[id] = {
-                    id: id,
-                    conclusion: '',
-                    rule: '',
-                    args: '',
-                    children: [],
-                    parents: [NaN],
-                    descendants: 0,
-                    dependencies: [],
-                    clusterType: ClusterKind.NONE,
-                };
-            }
-            nodes[id].conclusion = removeEscapedCharacters(conclusion);
-            nodes[id].rule = removeEscapedCharacters(rule);
-            nodes[id].args = removeEscapedCharacters(args);
-            nodes[id].descendants = commentJSON.subProofQty;
-        } else if (line.search('->') !== -1) {
-            const [child, parent] = line.split('->').map((x) => parseInt(x.trim()));
-            nodes[parent].children.push(child);
-            // If there isn't a child node
-            if (!nodes[child]) {
-                nodes[child] = {
-                    id: child,
-                    conclusion: '',
-                    rule: '',
-                    args: '',
-                    children: [],
-                    parents: [],
-                    descendants: 0,
-                    dependencies: [],
-                    clusterType: ClusterKind.NONE,
-                };
-            }
-            // If there is and is an invalid parent
-            else if (isNaN(nodes[child].parents[0])) {
-                nodes[child].parents = [];
-            }
-            nodes[child].parents.push(parent);
-        }
-    });
-
-    return comment ? [nodes, JSON.parse(comment)['letMap'], clustersInfos] : [nodes, {}, clustersInfos];
-}
-
 export const piNodeParents = (
     proof: NodeInterface[],
     hiddenNodesArray: number[],
@@ -295,69 +135,69 @@ export const groupPiNodeDependencies = (
     return piNodeDependencies;
 };
 
+// Groups the nodes of each component: a node joins the cluster of its first already placed parent with the
+// same component, otherwise it starts a cluster together with its same-component siblings.
+// The root stays out of the clusters (it is always visible).
 export const sliceNodesCluster = (
     proof: NodeInterface[],
     clusterMap: number[],
     nodeId = 0,
     slicedClusters: number[][] = [],
 ): number[][] => {
-    const currentNode = proof[nodeId];
+    const visited = new Uint8Array(proof.length);
+    const stack = [nodeId];
 
-    // If the node id is valid and wasn't inserted yet
-    if (nodeId && clusterMap[currentNode.id] === -1) {
-        // Get all parents with the same type
-        const parentsClusters: { [parentID: number]: number } = {};
-        for (let i = 0; i < currentNode.parents.length; i++) {
-            const p = currentNode.parents[i];
-            if (proof[p].clusterType === currentNode.clusterType) {
-                parentsClusters[p] = clusterMap[p];
-                break;
+    while (stack.length) {
+        const id = stack.pop() as number;
+        if (visited[id]) continue;
+        visited[id] = 1;
+        const currentNode = proof[id];
+
+        if (id && clusterMap[id] === -1) {
+            const parent = currentNode.parents.find(
+                (p) => proof[p].clusterType === currentNode.clusterType && clusterMap[p] !== -1,
+            );
+
+            if (parent !== undefined) {
+                const target = clusterMap[parent];
+                slicedClusters[target].push(id);
+                clusterMap[id] = target;
+            } else {
+                const clusterID = slicedClusters.length;
+                clusterMap[id] = clusterID;
+                slicedClusters.push([id]);
+
+                // Add the brothers with the same type in the same cluster
+                proof[currentNode.parents[0]].children.forEach((c) => {
+                    if (proof[c].clusterType === currentNode.clusterType && clusterMap[c] === -1) {
+                        slicedClusters[clusterID].push(c);
+                        clusterMap[c] = clusterID;
+                    }
+                });
             }
         }
 
-        const keys = Object.keys(parentsClusters);
-
-        // If the current node has the same type as (at least) one of it's parents
-        if (keys.length) {
-            // Put the current node in the cluster of the first parent with the same type
-            const target = parentsClusters[Number(keys[0])];
-            slicedClusters[target].push(currentNode.id);
-            clusterMap[currentNode.id] = target;
-        }
-        // Parent with different type
-        else {
-            const clusterID = slicedClusters.length;
-            clusterMap[currentNode.id] = clusterID;
-            slicedClusters.push([currentNode.id]);
-
-            // Add the brothers with the same type in the same cluster
-            proof[currentNode.parents[0]].children.forEach((c) => {
-                // If the brother node has the same type as the current one
-                if (proof[c].clusterType === currentNode.clusterType && c !== currentNode.id) {
-                    slicedClusters[clusterID].push(c);
-                    clusterMap[c] = clusterID;
-                }
-            });
-        }
+        // Reversed so the children are visited in order
+        for (let i = currentNode.children.length - 1; i >= 0; i--) stack.push(currentNode.children[i]);
     }
-
-    currentNode.children.forEach((child) => {
-        sliceNodesCluster(proof, clusterMap, child, slicedClusters);
-    });
     return slicedClusters;
 };
 
+// Conclusion of the top node(s) of every theory lemma cluster. A top node is a derivation (not an assumption) that is
+// used only from outside the theory/rewriting regions (the rewriting component may split a lemma in fragments).
 export const extractTheoryLemmas = (
     proof: NodeInterface[],
     clusters: ProofState['clustersInfos'],
-    haveCluster: boolean,
 ): ProofState['theoryLemmaMap'] => {
-    // If have clusters registered
-    if (haveCluster) {
-        return [proof[0].conclusion].concat(
-            clusters.filter((c) => c.type === ClusterKind.TL).map((c) => proof[c.hiddenNodes[0]].conclusion),
+    const inside = (kind: ClusterKind): boolean => kind === ClusterKind.TL || kind === ClusterKind.RW;
+    return clusters
+        .filter((c) => c.type === ClusterKind.TL)
+        .flatMap((c) =>
+            c.hiddenNodes
+                .filter(
+                    (id) =>
+                        proof[id].rule !== 'assume' && proof[id].parents.every((p) => !inside(proof[p].clusterType)),
+                )
+                .map((id) => proof[id].conclusion),
         );
-    } else {
-        return proof.filter((n) => n.rule === 'SCOPE').map((n) => n.conclusion);
-    }
 };

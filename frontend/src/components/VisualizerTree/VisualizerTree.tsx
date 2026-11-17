@@ -1,35 +1,42 @@
-/* eslint-disable @typescript-eslint/explicit-module-boundary-types */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useEffect, useReducer, useState } from 'react';
+import React, { useState } from 'react';
 
-import { Classes, Tree, TreeNodeInfo } from '@blueprintjs/core';
-import { TreeProps } from '../../interfaces/interfaces';
-import { castProofNodeToTreeNode } from '../VisualizerStage/VisualizerStage';
+import { Classes, Tree } from '@blueprintjs/core';
+import { TreeNode, TreeProps } from '../../interfaces/interfaces';
+import { collapseNode, expandNode, nodeAt, selectNode } from './treeState';
 
-const VisualizerTree: React.FC<TreeProps> = ({ darkTheme, proof, positionMap, content, setNodeInfo }: TreeProps) => {
+const VisualizerTree: React.FC<TreeProps> = ({
+    darkTheme,
+    proof,
+    positionMap,
+    content,
+    expandRoot = false,
+    setNodeInfo,
+}: TreeProps) => {
+    const initialNodes = () => (expandRoot ? expandNode(content, [0], proof, positionMap) : content);
+
     // STATES:
-    const [, forceUpdate] = useReducer((x) => x + 1, 0);
-    const [nodes, setNodes] = useState(content);
-    const [selected, setSelected] = useState(NaN);
+    const [nodes, setNodes] = useState<TreeNode[]>(initialNodes);
+    const [lastContent, setLastContent] = useState(content);
 
-    // USE EFFECT:
-    useEffect(() => setNodes(content), [content]);
+    // New content resets the tree
+    if (lastContent !== content) {
+        setLastContent(content);
+        setNodes(initialNodes());
+    }
 
-    // UTILS:
-    const forEachNode = (nodes: TreeNodeInfo[], callback: (node: TreeNodeInfo) => void) => {
-        if (nodes == null) {
-            return;
-        }
-
-        for (const node of nodes) {
-            callback(node);
-            forEachNode(node.childNodes ? node.childNodes : [], callback);
-        }
-    };
-
-    const handleNodeClick = (nodeData: any, _nodePath: number[], e: React.MouseEvent<HTMLElement>) => {
-        const toBeShow: any = selected !== nodeData.id ? nodeData : nodes[0];
+    // The callbacks receive a copy of the node props, so the state is always read by path
+    const handleNodeClick = (_nodeData: unknown, path: number[], e: React.MouseEvent<HTMLElement>) => {
+        const node = nodeAt(nodes, path);
+        if (!node) return;
+        const toBeShow = node.isSelected ? nodes[0] : node;
         setNodeInfo({
+            id: toBeShow.id,
+            stepId: toBeShow.stepId ?? '',
+            premises: toBeShow.premises ?? [],
+            discharge: toBeShow.discharge ?? [],
+            anchorPath: toBeShow.anchorPath ?? [],
+            anchorArgs: toBeShow.anchorArgs ?? null,
+            clusterType: toBeShow.clusterType ?? 0,
             rule: toBeShow.rule ? toBeShow.rule : '',
             args: toBeShow.args ? toBeShow.args : '',
             conclusion: toBeShow.conclusion ? toBeShow.conclusion : '',
@@ -38,31 +45,13 @@ const VisualizerTree: React.FC<TreeProps> = ({ darkTheme, proof, positionMap, co
             hiddenNodes: toBeShow.hiddenNodes,
             dependencies: toBeShow.dependencies,
         });
-        const originallySelected = nodeData.isSelected;
-
-        // Set all the nodes to be not selected
-        if (!e.shiftKey) forEachNode(nodes, (n) => (n.isSelected = false));
-
-        nodeData.isSelected = originallySelected == null ? true : !originallySelected;
-        setSelected(selected === nodeData.id ? NaN : nodeData.id);
+        setNodes(selectNode(nodes, path, e.shiftKey));
     };
 
-    const handleNodeCollapse = (nodeData: TreeNodeInfo) => {
-        nodeData.isExpanded = false;
-        forceUpdate();
-    };
+    const handleNodeCollapse = (_nodeData: unknown, path: number[]) => setNodes(collapseNode(nodes, path));
 
-    const handleNodeExpand = (nodeData: TreeNodeInfo) => {
-        nodeData.isExpanded = true;
-        if (nodeData.hasCaret && !nodeData.childNodes?.length) {
-            const currentNode = proof[positionMap[nodeData.id]];
-            currentNode.children.forEach((c) => {
-                const child = proof[positionMap[c]];
-                nodeData.childNodes?.push(castProofNodeToTreeNode(child));
-            });
-        }
-        forceUpdate();
-    };
+    const handleNodeExpand = (_nodeData: unknown, path: number[]) =>
+        setNodes(expandNode(nodes, path, proof, positionMap));
 
     return (
         <div style={{ backgroundColor: darkTheme ? '#394b59' : 'white' }}>
