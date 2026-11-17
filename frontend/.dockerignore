@@ -1,1 +1,6 @@
 node_modules
+dist
+public/cvc5
+.git
+*.log
+public/verit
