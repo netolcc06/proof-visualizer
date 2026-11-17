@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Button,
     Callout,
@@ -19,6 +19,7 @@ import {
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { selectTheme } from '../../store/features/theme/themeSlice';
 import {
+    selectCarcaraBackend,
     selectCheckReport,
     selectRare,
     selectRareDialogOpen,
@@ -28,7 +29,15 @@ import {
     setSliceDialog,
 } from '../../store/features/solver/solverSlice';
 import type { CheckReport } from '../../store/features/solver/solverSlice';
-import { MAX_DISTANCE, checkSliceAction, elaborateSliceAction, saveRare } from '../../store/features/solver/actions';
+import {
+    MAX_DISTANCE,
+    checkSliceAction,
+    elaborateSliceAction,
+    saveCarcaraBackend,
+    saveRare,
+} from '../../store/features/solver/actions';
+import { getBridgeHealth, getBridgeUrl, isCarcaraWasmAvailable } from '../../solvers';
+import type { Backend, BridgeHealth } from '../../solvers';
 import '../../scss/CarcaraDialogs.scss';
 
 const VERDICTS: Record<
@@ -66,7 +75,17 @@ const CheckReportDialog: React.FC = () => {
                     <DialogBody>
                         <Callout intent={verdict.intent} title={verdict.text}>
                             {verdict.note} <Tag minimal>{(report.durationMs / 1000).toFixed(2)} s</Tag>
+                            {report.backend ? (
+                                <Tag minimal style={{ marginLeft: 4 }}>
+                                    {report.backend === 'wasm' ? 'in browser (wasm)' : 'local bridge'}
+                                </Tag>
+                            ) : null}
                         </Callout>
+                        {report.note ? (
+                            <Callout intent="warning" style={{ marginTop: 12 }}>
+                                {report.note}
+                            </Callout>
+                        ) : null}
                         <FormGroup label="Carcara output (stderr)" style={{ marginTop: 12 }}>
                             <pre className="tool-output">
                                 {report.stderr.trim() || report.stdout.trim() || '(empty)'}
@@ -77,6 +96,51 @@ const CheckReportDialog: React.FC = () => {
                 </>
             ) : null}
         </Dialog>
+    );
+};
+
+// Where Carcara runs. Unset = automatic: in the browser when the wasm build is deployed, else the local bridge.
+const BackendChoice: React.FC<{ isOpen: boolean }> = ({ isOpen }) => {
+    const dispatch = useAppDispatch();
+    const chosen = useAppSelector(selectCarcaraBackend);
+    const [wasmOk, setWasmOk] = useState<boolean | undefined>(undefined);
+    const [health, setHealth] = useState<BridgeHealth | null | undefined>(undefined);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        isCarcaraWasmAvailable().then(setWasmOk, () => setWasmOk(false));
+        getBridgeHealth().then(setHealth, () => setHealth(null));
+    }, [isOpen]);
+
+    const effective: Backend = chosen ?? (wasmOk ? 'wasm' : 'bridge');
+    const bridgeHelp =
+        health === undefined
+            ? 'Checking the local bridge…'
+            : health === null
+              ? `The local bridge is unreachable at ${getBridgeUrl() || 'this origin'}.`
+              : health.tools.carcara
+                ? 'Native Carcara; needed for steps that call an external solver.'
+                : 'The bridge has no Carcara configured.';
+
+    return (
+        <FormGroup
+            label="Run Carcara"
+            helperText={chosen ? undefined : 'Default: in the browser when available, else the local bridge.'}
+        >
+            <RadioGroup
+                selectedValue={effective}
+                onChange={(e) => dispatch(saveCarcaraBackend(e.currentTarget.value as Backend))}
+            >
+                <Radio
+                    value="wasm"
+                    label={
+                        wasmOk === false ? 'In browser (wasm) - unavailable in this deployment' : 'In browser (wasm)'
+                    }
+                    disabled={wasmOk === false}
+                />
+                <Radio value="bridge" label={`Local bridge - ${bridgeHelp}`} />
+            </RadioGroup>
+        </FormGroup>
     );
 };
 
@@ -108,20 +172,21 @@ const RareDialog: React.FC = () => {
         <Dialog
             isOpen={isOpen}
             onClose={close}
-            title="RARE rules"
-            icon="document"
+            title="Carcara settings"
+            icon="cog"
             className={darkTheme ? Classes.DARK : ''}
             style={{ width: 640 }}
         >
             <DialogBody>
+                <BackendChoice isOpen={isOpen} />
                 <Switch
-                    label="Use the bridge default RARE file (bundled cvc5 rules)"
+                    label="Use the default RARE file (bundled cvc5 rules)"
                     checked={useDefault}
                     onChange={(e) => setUseDefault(e.currentTarget.checked)}
                 />
                 <FormGroup
                     label="Custom RARE file (.rare)"
-                    helperText="Sent to Carcara as the RARE file. Stored in this browser."
+                    helperText="Used as the RARE file by either backend. Stored in this browser."
                 >
                     <FileInput
                         fill

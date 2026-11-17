@@ -13,10 +13,11 @@
   "scripts": {
     "fetch:cvc5": "node scripts/fetch-cvc5.mjs",
     "fetch:verit": "node scripts/fetch-verit.mjs",
-    "predev": "npm run fetch:cvc5 && npm run fetch:verit",
+    "fetch:carcara": "node scripts/fetch-carcara.mjs",
+    "predev": "npm run fetch:cvc5 && npm run fetch:verit && npm run fetch:carcara",
     "dev": "vite",
     "start": "vite",
-    "prebuild": "npm run fetch:cvc5 && npm run fetch:verit",
+    "prebuild": "npm run fetch:cvc5 && npm run fetch:verit && npm run fetch:carcara",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",

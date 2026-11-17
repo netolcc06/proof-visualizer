@@ -1,6 +1,7 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '../../store';
-import { RARE_KEY, readPref } from './prefs';
+import type { Backend } from '../../../solvers/types';
+import { CARCARA_BACKEND_KEY, RARE_KEY, readPref } from './prefs';
 
 export const HISTORY_MAX = 10;
 
@@ -29,6 +30,10 @@ export interface CheckReport {
     durationMs: number;
     stdout: string;
     stderr: string;
+    /** Which backend ran Carcara. */
+    backend?: Backend;
+    /** Limits that apply to this result (e.g. steps that were not checked in the browser). */
+    note?: string;
 }
 
 export interface SliceDialogState {
@@ -45,6 +50,8 @@ export interface ToastMessage {
 export interface SolverState {
     history: HistoryEntry[];
     rare: RareState;
+    /** Chosen Carcara backend; null = automatic (wasm when available, else the bridge). */
+    carcaraBackend: Backend | null;
     lastRun: RunReport | null;
     checkReport: CheckReport | null;
     rareDialogOpen: boolean;
@@ -59,9 +66,15 @@ export const initialRare = (): RareState => {
     return { text: saved.text ?? '', useBridgeDefault: saved.useBridgeDefault ?? true };
 };
 
+export const initialCarcaraBackend = (): Backend | null => {
+    const saved = readPref<unknown>(CARCARA_BACKEND_KEY, null);
+    return saved === 'wasm' || saved === 'bridge' ? saved : null;
+};
+
 const initialState = (): SolverState => ({
     history: [],
     rare: initialRare(),
+    carcaraBackend: initialCarcaraBackend(),
     lastRun: null,
     checkReport: null,
     rareDialogOpen: false,
@@ -85,6 +98,9 @@ export const solverSlice = createSlice({
         },
         setRare: (state, action: PayloadAction<RareState>) => {
             state.rare = action.payload;
+        },
+        setCarcaraBackend: (state, action: PayloadAction<Backend | null>) => {
+            state.carcaraBackend = action.payload;
         },
         setLastRun: (state, action: PayloadAction<RunReport | null>) => {
             state.lastRun = action.payload;
@@ -111,6 +127,7 @@ export const {
     pushHistory,
     popHistory,
     setRare,
+    setCarcaraBackend,
     setLastRun,
     setCheckReport,
     setRareDialogOpen,
@@ -121,6 +138,7 @@ export const {
 
 export const selectHistory = (state: RootState): HistoryEntry[] => state.solver.history;
 export const selectRare = (state: RootState): RareState => state.solver.rare;
+export const selectCarcaraBackend = (state: RootState): Backend | null => state.solver.carcaraBackend;
 export const selectLastRun = (state: RootState): RunReport | null => state.solver.lastRun;
 export const selectCheckReport = (state: RootState): CheckReport | null => state.solver.checkReport;
 export const selectRareDialogOpen = (state: RootState): boolean => state.solver.rareDialogOpen;

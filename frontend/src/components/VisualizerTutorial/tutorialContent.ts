@@ -53,9 +53,9 @@ export const tutorials: string[][] = [
         'Select region… lets you drag a rectangle over the graph and save just that area as PNG or SVG. Esc cancels.',
     ],
     [
-        'Carcara menu: check and elaborate the proof, run through the local bridge.',
+        'Carcara menu: check and elaborate the proof, in the browser (wasm) or through the local bridge.',
         'Check proof validates the proof, and Elaborate proof expands it into a more detailed one.',
-        'RARE rules lets you provide extra rewrite rules. Revert returns to the previous proof.',
+        'Carcara settings chooses where Carcara runs (in the browser or on the local bridge) and lets you provide extra RARE rewrite rules. Revert returns to the previous proof.',
     ],
     ['Switches between dark and light mode.'],
     [

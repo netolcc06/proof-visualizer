@@ -2,17 +2,38 @@ import type { Action } from '@reduxjs/toolkit';
 import type { ThunkDispatch } from '@reduxjs/toolkit';
 import type { AppThunk, RootState } from '../../store';
 import { AletheSpliceError, parseAlethe, printAlethe, pruneUnreachable, spliceElaboratedSlice } from '../../../alethe';
-import { carcaraCheck, carcaraElaborate, carcaraSlice, runSolver } from '../../../solvers';
-import type { Backend, SolverId } from '../../../solvers';
+import {
+    EXTERNAL_TOOL_NOTE,
+    carcaraCheck,
+    carcaraCheckWasm,
+    carcaraElaborate,
+    carcaraElaborateWasm,
+    carcaraSlice,
+    carcaraSliceWasm,
+    isCarcaraWasmAvailable,
+    needsExternalTool,
+    runSolver,
+} from '../../../solvers';
+import type {
+    Backend,
+    CarcaraCheckRequest,
+    CarcaraCheckResponse,
+    CarcaraElaborateRequest,
+    CarcaraElaborateResponse,
+    CarcaraSliceRequest,
+    CarcaraSliceResponse,
+    SolverId,
+} from '../../../solvers';
 import { setBusy, setSpinner } from '../externalCmd/externalCmd';
 import { applyView, highlightSteps, selectProof, selectStyle } from '../proof/proofSlice';
 import { loadProof } from '../proof/loadProof';
 import type { LoadProofArgs, LoadResult } from '../proof/loadProof';
-import { RARE_KEY, writePref } from './prefs';
+import { CARCARA_BACKEND_KEY, RARE_KEY, writePref } from './prefs';
 import {
     popHistory,
     pushHistory,
     requestSolverPanel,
+    setCarcaraBackend,
     setCheckReport,
     setLastRun,
     setRare,
@@ -115,6 +136,57 @@ export const saveRare =
         dispatch(setRare(rare));
     };
 
+export const saveCarcaraBackend =
+    (backend: Backend): AppThunk =>
+    (dispatch) => {
+        writePref(CARCARA_BACKEND_KEY, backend);
+        dispatch(setCarcaraBackend(backend));
+    };
+
+export const WASM_UNAVAILABLE =
+    'Carcara in the browser is not available in this deployment (run `make carcara-wasm`). Choose the local bridge in the Carcara settings.';
+
+interface CarcaraClient {
+    backend: Backend;
+    check: (req: CarcaraCheckRequest, signal: AbortSignal) => Promise<CarcaraCheckResponse>;
+    elaborate: (req: CarcaraElaborateRequest, signal: AbortSignal) => Promise<CarcaraElaborateResponse>;
+    slice: (req: CarcaraSliceRequest, signal: AbortSignal) => Promise<CarcaraSliceResponse>;
+    /** " (wasm)" / " (bridge)" for busy labels */
+    tag: string;
+}
+
+const CLIENTS: Record<Backend, CarcaraClient> = {
+    bridge: {
+        backend: 'bridge',
+        check: carcaraCheck,
+        elaborate: carcaraElaborate,
+        slice: carcaraSlice,
+        tag: ' (bridge)',
+    },
+    wasm: {
+        backend: 'wasm',
+        check: (req, signal) => carcaraCheckWasm(req, { signal }),
+        elaborate: (req, signal) => carcaraElaborateWasm(req, { signal }),
+        slice: (req, signal) => carcaraSliceWasm(req, { signal }),
+        tag: ' (wasm)',
+    },
+};
+
+// The chosen backend, else wasm when the build is deployed, else the bridge
+async function carcaraClient(dispatch: Dispatch, state: RootState): Promise<CarcaraClient | null> {
+    const chosen = state.solver.carcaraBackend;
+    const wasmOk = chosen === 'bridge' ? false : Boolean(await isCarcaraWasmAvailable().catch(() => false));
+    if (chosen === 'wasm' && !wasmOk) {
+        fail(dispatch, WASM_UNAVAILABLE);
+        return null;
+    }
+    return CLIENTS[chosen ?? (wasmOk ? 'wasm' : 'bridge')];
+}
+
+// Appended to results that the browser build could not fully process
+const limitsNote = (client: CarcaraClient, proof: string): string | undefined =>
+    client.backend === 'wasm' && needsExternalTool(proof) ? EXTERNAL_TOOL_NOTE : undefined;
+
 const SOLVER_NAMES: Record<SolverId, string> = { cvc5: 'cvc5', verit: 'veriT' };
 
 export interface SolverRunArgs {
@@ -205,7 +277,11 @@ function verdictOf(res: { valid: boolean; holey: boolean; timedOut?: boolean }):
 export const checkProofAction = (): AppThunk<Promise<ActionResult>> => async (dispatch, getState) => {
     const ctx = carcaraContext(dispatch, getState());
     if (!ctx) return { ok: false, error: 'missing input' };
-    const run = await withBusy(dispatch, 'Checking proof with Carcara…', (signal) => carcaraCheck(ctx, signal));
+    const client = await carcaraClient(dispatch, getState());
+    if (!client) return { ok: false, error: 'backend unavailable' };
+    const run = await withBusy(dispatch, `Checking proof with Carcara${client.tag}…`, (signal) =>
+        client.check(ctx, signal),
+    );
     if (!run.ok) return failBusy(dispatch, 'Carcara check', run);
     const res = run.value;
     dispatch(
@@ -215,6 +291,8 @@ export const checkProofAction = (): AppThunk<Promise<ActionResult>> => async (di
             durationMs: res.durationMs,
             stdout: res.stdout,
             stderr: res.stderr,
+            backend: client.backend,
+            note: limitsNote(client, ctx.proof),
         }),
     );
     return { ok: true };
@@ -224,7 +302,11 @@ export const elaborateProofAction = (): AppThunk<Promise<ActionResult>> => async
     const state = getState();
     const ctx = carcaraContext(dispatch, state);
     if (!ctx) return { ok: false, error: 'missing input' };
-    const run = await withBusy(dispatch, 'Elaborating proof with Carcara…', (signal) => carcaraElaborate(ctx, signal));
+    const client = await carcaraClient(dispatch, state);
+    if (!client) return { ok: false, error: 'backend unavailable' };
+    const run = await withBusy(dispatch, `Elaborating proof with Carcara${client.tag}…`, (signal) =>
+        client.elaborate(ctx, signal),
+    );
     if (!run.ok) return failBusy(dispatch, 'Carcara elaboration', run);
     const res = run.value;
     if (!res.proof) {
@@ -234,8 +316,14 @@ export const elaborateProofAction = (): AppThunk<Promise<ActionResult>> => async
         replaceProof({ name: `${baseName(state.file.name)}.elab.alethe`, text: res.proof, smt: ctx.problem }),
     );
     if (!loaded.ok) return fail(dispatch, loaded.error);
-    dispatch(toast('success', `Proof elaborated in ${(res.durationMs / 1000).toFixed(2)} s.`));
-    return { ok: true };
+    const note = limitsNote(client, ctx.proof);
+    dispatch(
+        toast(
+            note ? 'warning' : 'success',
+            `Proof elaborated in ${(res.durationMs / 1000).toFixed(2)} s.` + (note ? `\n${note}` : ''),
+        ),
+    );
+    return { ok: true, message: note };
 };
 
 export interface SliceArgs {
@@ -252,11 +340,14 @@ export const elaborateSliceAction =
         const state = getState();
         const ctx = carcaraContext(dispatch, state);
         if (!ctx) return { ok: false, error: 'missing input' };
-        const run = await withBusy(dispatch, `Elaborating slice from ${from}…`, (signal) =>
-            carcaraSlice({ ...ctx, from, maxDistance, elaborate: true }, signal),
+        const client = await carcaraClient(dispatch, state);
+        if (!client) return { ok: false, error: 'backend unavailable' };
+        const run = await withBusy(dispatch, `Elaborating slice from ${from}${client.tag}…`, (signal) =>
+            client.slice({ ...ctx, from, maxDistance, elaborate: true }, signal),
         );
         if (!run.ok) return failBusy(dispatch, 'Slice elaboration', run);
         const res = run.value;
+        const note = limitsNote(client, res.slicedProof ?? ctx.proof);
         if (!res.elaboratedProof) {
             return fail(
                 dispatch,
@@ -273,8 +364,13 @@ export const elaborateSliceAction =
                 }),
             );
             if (!loaded.ok) return fail(dispatch, loaded.error);
-            dispatch(toast('success', `Opened the elaborated slice from ${from}.`));
-            return { ok: true };
+            dispatch(
+                toast(
+                    note ? 'warning' : 'success',
+                    `Opened the elaborated slice from ${from}.` + (note ? `\n${note}` : ''),
+                ),
+            );
+            return { ok: true, message: note };
         }
 
         let text: string;
@@ -298,7 +394,7 @@ export const elaborateSliceAction =
         dispatch(applyView('colored-full'));
         dispatch(highlightSteps({ stepIds: [from, ...newIds] }));
         const message = `Elaborated slice from ${from}: ${newIds.length} new steps.`;
-        dispatch(toast('success', message));
+        dispatch(toast(note ? 'warning' : 'success', note ? `${message}\n${note}` : message));
         return { ok: true, message };
     };
 
@@ -307,10 +403,12 @@ export const checkSliceAction =
     async (dispatch, getState) => {
         const ctx = carcaraContext(dispatch, getState());
         if (!ctx) return { ok: false, error: 'missing input' };
-        const run = await withBusy(dispatch, `Checking slice from ${from}…`, async (signal) => {
-            const slice = await carcaraSlice({ ...ctx, from, maxDistance }, signal);
+        const client = await carcaraClient(dispatch, getState());
+        if (!client) return { ok: false, error: 'backend unavailable' };
+        const run = await withBusy(dispatch, `Checking slice from ${from}${client.tag}…`, async (signal) => {
+            const slice = await client.slice({ ...ctx, from, maxDistance }, signal);
             if (!slice.slicedProof || slice.slicedProblem === null) return { slice };
-            const check = await carcaraCheck(
+            const check = await client.check(
                 { proof: slice.slicedProof, problem: slice.slicedProblem, rareFile: ctx.rareFile },
                 signal,
             );
@@ -331,6 +429,8 @@ export const checkSliceAction =
                 durationMs: slice.durationMs + check.durationMs,
                 stdout: check.stdout,
                 stderr: check.stderr,
+                backend: client.backend,
+                note: limitsNote(client, slice.slicedProof ?? ''),
             }),
         );
         return { ok: true };

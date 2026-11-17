@@ -13,10 +13,13 @@ import {
     checkSliceAction,
     elaborateProofAction,
     elaborateSliceAction,
+    WASM_UNAVAILABLE,
     revertProof,
     runSolverAction,
+    saveCarcaraBackend,
     saveRare,
 } from './actions';
+import { EXTERNAL_TOOL_NOTE } from '../../../solvers';
 
 vi.mock('../../../solvers', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../../../solvers')>()),
@@ -24,6 +27,10 @@ vi.mock('../../../solvers', async (importOriginal) => ({
     carcaraCheck: vi.fn(),
     carcaraElaborate: vi.fn(),
     carcaraSlice: vi.fn(),
+    carcaraCheckWasm: vi.fn(),
+    carcaraElaborateWasm: vi.fn(),
+    carcaraSliceWasm: vi.fn(),
+    isCarcaraWasmAvailable: vi.fn(),
 }));
 
 const smtFiles = import.meta.glob('../../../alethe/__fixtures__/*.smt2', {
@@ -39,6 +46,10 @@ const runSolver = vi.mocked(solvers.runSolver);
 const carcaraCheck = vi.mocked(solvers.carcaraCheck);
 const carcaraElaborate = vi.mocked(solvers.carcaraElaborate);
 const carcaraSlice = vi.mocked(solvers.carcaraSlice);
+const carcaraCheckWasm = vi.mocked(solvers.carcaraCheckWasm);
+const carcaraElaborateWasm = vi.mocked(solvers.carcaraElaborateWasm);
+const carcaraSliceWasm = vi.mocked(solvers.carcaraSliceWasm);
+const wasmAvailable = vi.mocked(solvers.isCarcaraWasmAvailable);
 
 const base = { stdout: '', stderr: '', exitCode: 0, durationMs: 1200 };
 
@@ -50,6 +61,8 @@ const loadedStore = (smt: string | undefined = LIA_SMT) => {
 
 beforeEach(() => {
     vi.resetAllMocks();
+    // Existing tests exercise the bridge; the wasm backend is switched on per test
+    wasmAvailable.mockResolvedValue(false);
     localStorage.clear();
 });
 
@@ -332,5 +345,137 @@ describe('slice actions', () => {
             verdict: 'valid',
             durationMs: 1500,
         });
+    });
+});
+
+describe('carcara backend', () => {
+    const checkOk = { ...base, valid: true, holey: false };
+    const LG_PROOF =
+        '(assume a0 (> x 5))\n(assume a1 (< x 3))\n' +
+        '(step t1 (cl (not (> x 5)) (not (< x 3))) :rule lia_generic)\n' +
+        '(step t2 (cl) :rule resolution :premises (t1 a0 a1))\n';
+    const LG_SMT = '(set-logic QF_LIA)\n(declare-const x Int)\n(assert (> x 5))\n(assert (< x 3))\n(check-sat)\n';
+
+    it('defaults to wasm when it is available', async () => {
+        wasmAvailable.mockResolvedValue(true);
+        carcaraCheckWasm.mockResolvedValue(checkOk);
+        const store = loadedStore();
+        const promise = store.dispatch(checkProofAction());
+        await vi.waitFor(() => expect(store.getState().externalCmd.busyLabel).toContain('Carcara (wasm)'));
+        await promise;
+        expect(carcaraCheckWasm).toHaveBeenCalledWith(
+            expect.objectContaining({ problem: LIA_SMT, rareFile: undefined }),
+            { signal: expect.any(AbortSignal) },
+        );
+        expect(carcaraCheck).not.toHaveBeenCalled();
+        expect(store.getState().solver.checkReport).toMatchObject({ verdict: 'valid', backend: 'wasm' });
+    });
+
+    it('falls back to the bridge when wasm is not deployed', async () => {
+        wasmAvailable.mockResolvedValue(false);
+        carcaraCheck.mockResolvedValue(checkOk);
+        const store = loadedStore();
+        const promise = store.dispatch(checkProofAction());
+        await vi.waitFor(() => expect(store.getState().externalCmd.busyLabel).toContain('Carcara (bridge)'));
+        await promise;
+        expect(carcaraCheckWasm).not.toHaveBeenCalled();
+        expect(store.getState().solver.checkReport).toMatchObject({ backend: 'bridge' });
+        expect(store.getState().solver.checkReport?.note).toBeUndefined();
+    });
+
+    it('honours an explicit bridge choice without probing for wasm', async () => {
+        carcaraCheck.mockResolvedValue(checkOk);
+        const store = loadedStore();
+        store.dispatch(saveCarcaraBackend('bridge'));
+        expect(JSON.parse(localStorage.getItem('pv.carcaraBackend') ?? 'null')).toBe('bridge');
+        await store.dispatch(checkProofAction());
+        expect(carcaraCheck).toHaveBeenCalledTimes(1);
+        expect(carcaraCheckWasm).not.toHaveBeenCalled();
+        expect(wasmAvailable).not.toHaveBeenCalled();
+    });
+
+    it('honours an explicit wasm choice, and says so when the build is missing', async () => {
+        const store = loadedStore();
+        store.dispatch(saveCarcaraBackend('wasm'));
+        wasmAvailable.mockResolvedValue(false);
+        expect(await store.dispatch(checkProofAction())).toEqual({ ok: false, error: 'backend unavailable' });
+        expect(store.getState().solver.toast?.message).toBe(WASM_UNAVAILABLE);
+        expect(carcaraCheck).not.toHaveBeenCalled();
+        expect(carcaraCheckWasm).not.toHaveBeenCalled();
+        expect(store.getState().externalCmd.spinner).toBe('off');
+
+        wasmAvailable.mockResolvedValue(true);
+        carcaraCheckWasm.mockResolvedValue(checkOk);
+        expect((await store.dispatch(checkProofAction())).ok).toBe(true);
+        expect(carcaraCheckWasm).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads the saved choice at startup and ignores junk', () => {
+        localStorage.setItem('pv.carcaraBackend', JSON.stringify('wasm'));
+        expect(createAppStore().getState().solver.carcaraBackend).toBe('wasm');
+        localStorage.setItem('pv.carcaraBackend', JSON.stringify('cloud'));
+        expect(createAppStore().getState().solver.carcaraBackend).toBeNull();
+    });
+
+    it('elaborates the proof and slices through wasm, with the same results as the bridge', async () => {
+        wasmAvailable.mockResolvedValue(true);
+        carcaraElaborateWasm.mockResolvedValue({ ...base, proof: fixture('lia.verit.alethe') });
+        carcaraSliceWasm.mockResolvedValue({
+            ...base,
+            slicedProof: 'sp',
+            slicedProblem: 'sprob',
+            elaboratedProof: LIA_SLICE,
+        });
+        const store = loadedStore();
+        expect((await store.dispatch(elaborateProofAction())).ok).toBe(true);
+        expect(store.getState().file.name).toBe('lia.elab.alethe');
+        const sliceStore = loadedStore();
+        const result = await sliceStore.dispatch(elaborateSliceAction({ from: 't28', maxDistance: 1000000 }));
+        expect(result.ok).toBe(true);
+        expect(carcaraSliceWasm).toHaveBeenCalledWith(
+            expect.objectContaining({ from: 't28', elaborate: true, problem: LIA_SMT }),
+            { signal: expect.any(AbortSignal) },
+        );
+        expect(sliceStore.getState().solver.toast?.message).toMatch(/^Elaborated slice from t28: \d+ new steps\.$/);
+
+        carcaraCheckWasm.mockResolvedValue(checkOk);
+        await sliceStore.dispatch(checkSliceAction({ from: 't28', maxDistance: 2 }));
+        expect(carcaraCheckWasm).toHaveBeenCalledWith(expect.objectContaining({ proof: 'sp', problem: 'sprob' }), {
+            signal: expect.any(AbortSignal),
+        });
+        expect(carcaraSlice).not.toHaveBeenCalled();
+        expect(carcaraElaborate).not.toHaveBeenCalled();
+        expect(carcaraCheck).not.toHaveBeenCalled();
+    });
+
+    it('notes that lia_generic steps are not elaborated in the browser', async () => {
+        wasmAvailable.mockResolvedValue(true);
+        carcaraCheckWasm.mockResolvedValue({ ...base, valid: true, holey: true });
+        carcaraElaborateWasm.mockResolvedValue({ ...base, proof: LG_PROOF });
+        const store = createAppStore();
+        store.dispatch(loadProof({ name: 'lg.alethe', text: LG_PROOF, smt: LG_SMT }));
+
+        await store.dispatch(checkProofAction());
+        expect(store.getState().solver.checkReport).toMatchObject({ verdict: 'holey', note: EXTERNAL_TOOL_NOTE });
+
+        await store.dispatch(elaborateProofAction());
+        expect(store.getState().solver.toast).toMatchObject({ intent: 'warning' });
+        expect(store.getState().solver.toast?.message).toContain(EXTERNAL_TOOL_NOTE);
+    });
+
+    it('does not add the note for the bridge, or for proofs without such steps', async () => {
+        carcaraCheck.mockResolvedValue({ ...base, valid: true, holey: true });
+        const store = createAppStore();
+        store.dispatch(saveCarcaraBackend('bridge'));
+        store.dispatch(loadProof({ name: 'lg.alethe', text: LG_PROOF, smt: LG_SMT }));
+        await store.dispatch(checkProofAction());
+        expect(store.getState().solver.checkReport?.note).toBeUndefined();
+
+        wasmAvailable.mockResolvedValue(true);
+        carcaraCheckWasm.mockResolvedValue({ ...base, valid: true, holey: false });
+        const plain = loadedStore();
+        plain.dispatch(saveCarcaraBackend('wasm'));
+        await plain.dispatch(checkProofAction());
+        expect(plain.getState().solver.checkReport?.note).toBeUndefined();
     });
 });

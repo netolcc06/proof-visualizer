@@ -17,5 +17,6 @@ export function writePref(key: string, value: unknown): void {
 }
 
 export const RARE_KEY = 'pv.rare';
+export const CARCARA_BACKEND_KEY = 'pv.carcaraBackend';
 export const PANEL_KEY = 'pv.solverPanel';
 export const PANEL_LAYOUT_KEY = 'pv.solverPanelLayout';

@@ -7,6 +7,8 @@ export * from './types';
 export * from './output';
 export * from './bridge';
 export { runCvc5Wasm, isCvc5WasmAvailable, CVC5_DEFAULT_ARGS } from './cvc5Wasm';
+export * from './carcaraCli';
+export { carcaraCheckWasm, carcaraElaborateWasm, carcaraSliceWasm, isCarcaraWasmAvailable } from './carcaraWasm';
 export { runVeritWasm, isVeritWasmAvailable, VERIT_DEFAULT_ARGS } from './veritWasm';
 
 export interface RunSolverRequest {

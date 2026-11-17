@@ -439,7 +439,7 @@ const VisualizerNavbar: React.FC<NavbarPropsAndRedux> = ({
             <Menu className="nav-menu">
                 <MenuItem icon="endorsed" text="Check proof" onClick={() => void dispatch(checkProofAction())} />
                 <MenuItem icon="build" text="Elaborate proof" onClick={() => void dispatch(elaborateProofAction())} />
-                <MenuItem icon="document" text="RARE rules…" onClick={() => dispatch(setRareDialogOpen(true))} />
+                <MenuItem icon="cog" text="Carcara settings…" onClick={() => dispatch(setRareDialogOpen(true))} />
                 <MenuItem
                     icon="undo"
                     text={history.length ? `Revert to previous proof (${history.length})` : 'Revert to previous proof'}

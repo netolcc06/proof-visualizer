@@ -11,3 +11,6 @@ npm-debug.log*
 
 # Copied by scripts/fetch-verit.mjs
 /public/verit/
+
+# Copied by scripts/fetch-carcara.mjs
+/public/carcara/

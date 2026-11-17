@@ -39,7 +39,7 @@ export interface SolveRequest {
 interface CarcaraBase {
     proof: string;
     problem: string;
-    /** Content of a RARE rules file; the bridge falls back to its bundled one. */
+    /** Content of a RARE rules file; without it the bundled cvc5 rules are used (by the bridge or the wasm runner). */
     rareFile?: string;
     args?: string[];
     timeoutMs?: number;
