@@ -1,0 +1,48 @@
+{
+    "port": 4000,
+    "host": "127.0.0.1",
+    "allowedOrigins": [
+        "http://localhost:5173"
+    ],
+    "maxConcurrent": 2,
+    "defaultTimeoutMs": 60000,
+    "maxTimeoutMs": 600000,
+    "maxBodyBytes": 67108864,
+    "tools": {
+        "cvc5": {
+            "command": "/usr/local/bin/cvc5"
+        },
+        "verit": {
+            "command": "wsl",
+            "args": [
+                "-d",
+                "Ubuntu",
+                "--",
+                "veriT"
+            ],
+            "pathStyle": "wsl",
+            "defaultArgs": [
+                "--disable-banner",
+                "--disable-print-success",
+                "--proof=-",
+                "--proof-prune",
+                "--proof-merge",
+                "--proof-with-sharing"
+            ]
+        },
+        "carcara": {
+            "command": "wsl",
+            "args": [
+                "-d",
+                "Ubuntu",
+                "--",
+                "/home/me/.cargo/bin/carcara"
+            ],
+            "pathStyle": "wsl",
+            "defaultArgs": [
+                "--allow-int-real-subtyping"
+            ],
+            "rareFile": "rare/cvc5-rewrites.rare"
+        }
+    }
+}

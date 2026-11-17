@@ -1,0 +1,21 @@
+{
+    "name": "proof-visualizer-bridge",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Local HTTP bridge that lets the proof visualizer run native cvc5, veriT and Carcara",
+    "type": "module",
+    "engines": {
+        "node": ">=22.18"
+    },
+    "scripts": {
+        "start": "node src/server.ts",
+        "dev": "node --watch src/server.ts",
+        "test": "node --test test/*.test.ts",
+        "typecheck": "tsc --noEmit",
+        "fetch:rare": "node scripts/fetch-rare.mjs"
+    },
+    "devDependencies": {
+        "@types/node": "^24.0.0",
+        "typescript": "~6.0.3"
+    }
+}
