@@ -1,0 +1,11 @@
+--- a/src/utils/veriT-qsort.c	2026-03-05 13:41:05.000000000 -0300
++++ b/src/utils/veriT-qsort.c	2026-11-16 21:04:33.794911922 -0300
+@@ -34,7 +34,7 @@
+  * SUCH DAMAGE.
+  */
+ 
+-#include <sys/cdefs.h>
++/* sys/cdefs.h is not provided by emscripten and nothing from it is used */
+ #if defined(LIBC_SCCS) && !defined(lint)
+ #if 0
+ static char sccsid[] = "@(#)qsort.c    8.1 (Berkeley) 6/4/93";
