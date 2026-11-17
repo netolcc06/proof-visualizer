@@ -42,7 +42,8 @@ RUN git init -q . && git remote add origin https://github.com/ufmg-smite/carcara
     && test "$(git rev-parse HEAD)" = "${CARCARA_REV}"
 COPY patches/ /build/patches/
 RUN cat /build/patches/*.patch | patch -p1
-COPY emcc-run.sh build.sh /opt/carcara-build/
+# Explicit mode: checkouts on Windows or with core.fileMode=false lose the executable bit
+COPY --chmod=0755 emcc-run.sh build.sh /opt/carcara-build/
 
 # Cargo registry/git and the target dir are build caches only; the artifacts are copied out in the same RUN.
 RUN --mount=type=cache,target=/opt/cargo/registry \
