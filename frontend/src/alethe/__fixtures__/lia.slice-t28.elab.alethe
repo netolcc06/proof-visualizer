@@ -1,0 +1,13 @@
+(assume a3 (and (> z 7) (< (* 2 y) 9)))
+(step t18 (cl (not (= (not (>= y 5)) (< y 5))) (not (not (>= y 5))) (< y 5)) :rule equiv_pos2)
+(step t19 (cl (= (< y 5) (not (>= y 5)))) :rule hole)
+(step t20 (cl (= (not (>= y 5)) (< y 5))) :rule symm :premises (t19))
+(step t21 (cl (not (= (< (* 2 y) 9) (not (>= y 5)))) (not (< (* 2 y) 9)) (not (>= y 5))) :rule equiv_pos2)
+(step t22 (cl (= (< (* 2 y) 9) (not (>= (* 2 y) 9)))) :rule hole)
+(step t24 (cl (= (not (>= (* 2 y) 9)) (not (>= y 5)))) :rule hole)
+(step t25 (cl (= (< (* 2 y) 9) (not (>= y 5)))) :rule trans :premises (t22 t24))
+(step t26 (cl (< (* 2 y) 9)) :rule and :premises (a3) :args (1))
+(step t27 (cl (not (>= y 5))) :rule resolution :premises (t21 t25 t26) :args ((= (< (* 2 y) 9) (not (>= y 5))) false (< (* 2 y) 9) false))
+(step t28 (cl (< y 5)) :rule resolution :premises (t18 t20 t27) :args ((= (not (>= y 5)) (< y 5)) false (not (>= y 5)) false))
+(step slice_end (cl) :rule hole :premises (t28))
+

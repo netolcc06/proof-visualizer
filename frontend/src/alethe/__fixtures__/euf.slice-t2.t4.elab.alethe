@@ -1,0 +1,11 @@
+(anchor :step t2)
+(assume t2.a0 (= (f b) (f c)))
+(assume t2.a1 (= a c))
+(step t2.t0 (cl (= (f a) (f c))) :rule hole)
+(step t2.t1 (cl (= (f c) (f b))) :rule hole)
+(step t2.t2 (cl (= (f a) (f b))) :rule trans :premises (t2.t0 t2.t1))
+(step t2.t3 (cl (= b b)) :rule refl)
+(step t2.t4 (cl (= (g (f a) b) (g (f b) b))) :rule cong :premises (t2.t2 t2.t3))
+(step t2 (cl (not (= (f b) (f c))) (not (= a c)) (= (g (f a) b) (g (f b) b))) :rule subproof :discharge (t2.a0 t2.a1))
+(step slice_end (cl) :rule hole :premises (t2))
+

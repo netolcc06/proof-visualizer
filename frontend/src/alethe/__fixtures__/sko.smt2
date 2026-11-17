@@ -1,0 +1,5 @@
+(set-logic UFLIA)
+(declare-fun P (Int) Bool)
+(assert (exists ((x Int)) (and (> x 3) (P x))))
+(assert (forall ((y Int)) (not (P y))))
+(check-sat)

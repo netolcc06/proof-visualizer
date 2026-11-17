@@ -1,0 +1,5 @@
+(assume h1 (! (not (! (= (f a) (f b)) :named @p_1)) :named @p_2))
+(assume h2 (= a b))
+(step t1 (cl @p_1 (not (= a b))) :rule eq_congruent)
+(step t2 (cl @p_1) :rule resolution :premises (t1 h2))
+(step t3 (cl) :rule resolution :premises (h1 t2))
