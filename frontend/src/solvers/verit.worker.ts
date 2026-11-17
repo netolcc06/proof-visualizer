@@ -55,7 +55,8 @@ type VeritWorkerMessage = import('./veritWorkerTypes').VeritWorkerMessage;
             const mod = await ctx.createVeriT({
                 print: (l) => out.push(l),
                 printErr: (l) => err.push(l),
-                locateFile: (p) => baseUrl + p,
+                // The glue asks for its link name (veriT.wasm); the build ships it as verit.wasm
+                locateFile: (p) => baseUrl + (p.endsWith('.wasm') ? 'verit.wasm' : p),
                 // Reuse the module compiled once on the main thread.
                 ...(wasmModule && {
                     instantiateWasm: (imports, receive) => {

@@ -26,7 +26,8 @@ async function run(problem: string, args: string[]) {
     let stdout = '';
     let stderr = '';
     const m = await createVeriT({
-        wasmBinary: readFileSync(resolve(dist, 'verit.wasm')),
+        // The glue asks for its link name (veriT.wasm); the build ships it as verit.wasm
+        locateFile: (p: string) => resolve(dist, p.endsWith('.wasm') ? 'verit.wasm' : p),
         print: (l: string) => (stdout += l + '\n'),
         printErr: (l: string) => (stderr += l + '\n'),
     });

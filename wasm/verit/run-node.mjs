@@ -8,16 +8,17 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.VERIT_DIST ?? join(here, 'dist');
 const createVeriT = createRequire(import.meta.url)(join(dist, 'verit.js'));
-const wasmBinary = readFileSync(join(dist, 'verit.wasm'));
+// The glue asks for its link name (veriT.wasm); the build ships it as verit.wasm
+const locateFile = (p) => join(dist, p.endsWith('.wasm') ? 'verit.wasm' : p);
 
 const FLAGS = ['--disable-banner', '--disable-print-success', '--proof=-', '--proof-prune', '--proof-merge', '--proof-with-sharing'];
 
 // One fresh module instance per run (veriT keeps global state, so instances are not reusable).
-export async function runVeriT(problem, extra = [], wasm = wasmBinary) {
+export async function runVeriT(problem, extra = []) {
   let stdout = '', stderr = '';
   const t0 = performance.now();
   const m = await createVeriT({
-    wasmBinary: wasm,
+    locateFile,
     print: (l) => { stdout += l + '\n'; },
     printErr: (l) => { stderr += l + '\n'; },
     noExitRuntime: false,
