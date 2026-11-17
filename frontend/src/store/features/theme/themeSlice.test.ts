@@ -1,6 +1,8 @@
-import counterReducer, { ThemeState, toggle } from './themeSlice';
+import { describe, it, expect } from 'vitest';
+import counterReducer, { toggle } from './themeSlice';
+import type { ThemeState } from '../../../interfaces/interfaces';
 
-describe('file reducer', () => {
+describe('theme reducer', () => {
     const initialState: ThemeState = {
         value: true,
     };
