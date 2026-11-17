@@ -1,0 +1,69 @@
+# Builds the frontend (with the in-browser cvc5 and veriT) and deploys it to GitHub Pages.
+# Pages must use "GitHub Actions" as its source, and the github-pages environment must allow the branch.
+name: Deploy to GitHub Pages
+
+on:
+    push:
+        branches: [main, improvements]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    pages: write
+    id-token: write
+
+concurrency:
+    group: pages
+    cancel-in-progress: true
+
+jobs:
+    build:
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+            # veriT -> WebAssembly (wasm/verit/Dockerfile), cached between runs
+            - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+            - name: Build veriT (WebAssembly)
+              uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+              with:
+                  context: wasm/verit
+                  target: dist
+                  outputs: type=local,dest=wasm/verit/dist
+                  cache-from: type=gha,scope=verit-wasm
+                  cache-to: type=gha,mode=max,scope=verit-wasm
+
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 22
+                  cache: npm
+                  cache-dependency-path: frontend/package-lock.json
+
+            - name: Install
+              working-directory: frontend
+              run: npm ci
+            - name: Typecheck, lint and test
+              working-directory: frontend
+              run: |
+                  npm run typecheck
+                  npx eslint .
+                  npm test
+            # Also downloads the official cvc5 wasm and copies the veriT build (prebuild)
+            - name: Build
+              working-directory: frontend
+              run: npm run build
+
+            - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+            - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+              with:
+                  path: frontend/dist
+
+    deploy:
+        needs: build
+        runs-on: ubuntu-24.04
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - id: deployment
+              uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
